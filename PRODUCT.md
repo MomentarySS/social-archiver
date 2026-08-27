@@ -5,7 +5,7 @@
 
 ## Platform
 
-web
+desktop
 
 ## Users
 
@@ -32,12 +32,14 @@ Confirmed now:
 - Platforms in use: Weibo, X, and Instagram. All three have been cached and browsed from real local archives on this machine.
 - Original posts only (no 转发 / retweets); text-only posts are first-class, not skipped.
 - Incremental writes into the existing user folder; media that already exists is skipped; metadata and `index.html` are refreshed.
-- In-app browse mimics the source timeline (Weibo light, X dark, Instagram light). Offline HTML is written to the user folder after a successful cache and can be regenerated from Browse.
+- In-app browse mimics the source timeline (Weibo light, X dark, Instagram light). Offline HTML is written to the user folder after a successful cache and can be regenerated from Browse; each platform exports its own skin (Instagram uses IG Blue links and brand gradient cover, not the Weibo layout).
+- Browse tab includes a multi-user manager: list archived accounts, per-user cookies, batch update/delete, and serial batch download queue.
+- Global shortcuts `Ctrl+1/2/3` switch Cache / Browse / Settings tabs.
 - Cookie-gated access; X guest tokens are not sufficient.
 - Weibo live photos are one grid cell (still + hover motion), not a still plus a separate video cell.
 - Videos play in the window when Chromium can decode them. Files that only the OS player can decode (often HEVC live motion) stay on disk and open via the system player from the card.
 - Profile avatars are cached next to the archive (`_avatar.jpg` / `_avatar.png` / `_avatar.webp` / `_avatar.gif`) and shown on the profile header and each post.
-- Packaged Windows zip ships a frozen backend (Weibo fetcher + gallery-dl for X and Instagram); no separate Python install for end users.
+- Packaged Windows zip ships a frozen backend (Weibo fetcher + gallery-dl for X and Instagram); no separate Python install for end users. At runtime, a system-installed gallery-dl is preferred when present so users can upgrade without rebuilding the app.
 
 Undecided, do not lock:
 
