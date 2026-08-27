@@ -12,3 +12,11 @@ export const PLATFORM_COOKIE_KEYS: Record<Platform, string> = {
   weibo: 'weibo',
   instagram: 'instagram',
 }
+
+export function normalizePlatform(value?: string | null, fallback: Platform = 'weibo'): Platform {
+  const p = String(value || fallback || '').toLowerCase()
+  if (p === 'twitter' || p === 'x') return 'twitter'
+  if (p === 'instagram') return 'instagram'
+  if (p === 'weibo') return 'weibo'
+  return fallback
+}

@@ -77,9 +77,9 @@ import DownloadProgress from '../components/DownloadProgress.vue'
 import LogPanel from '../components/LogPanel.vue'
 import { writeArchiveHtml } from '../utils/archiveHtml.js'
 import { appPlatform, setAppPlatform } from '../skin.js'
-import { cookieForPlatform, savePlatformCookie } from '../utils/session.js'
+import { cookieForPlatform, hasUsableCookie, savePlatformCookie, saveUserCookie } from '../utils/session.js'
 import { useToast } from '../composables/useToast'
-import type { DownloadEvent, DoneResult, ErrorResult, LogEvent } from '../electron-api.d.ts'
+import type { DownloadEvent, ErrorResult, LogEvent } from '../electron-api.d.ts'
 
 interface Progress {
   percent?: number
@@ -151,17 +151,17 @@ async function handleDownload() {
     return
   }
 
-  if (platform.value === 'twitter' && !/(?:^|;\s*)auth_token=/.test(cookie.value)) {
+  if (platform.value === 'twitter' && !hasUsableCookie('twitter', cookie.value)) {
     toast.warning('请填写 auth_token。可点「应用内登录 X」，或从 x.com 的 Cookie 里单独复制。')
     return
   }
 
-  if (platform.value === 'weibo' && !cookie.value.trim()) {
-    toast.warning('微博需要 Cookie。请先粘贴，或使用应用内登录 / 系统浏览器复制。')
+  if (platform.value === 'weibo' && !hasUsableCookie('weibo', cookie.value)) {
+    toast.warning('微博需要包含 SUB 的 Cookie。请先粘贴，或使用应用内登录 / 系统浏览器复制。')
     return
   }
 
-  if (platform.value === 'instagram' && !/sessionid=/.test(cookie.value)) {
+  if (platform.value === 'instagram' && !hasUsableCookie('instagram', cookie.value)) {
     toast.warning('请填写 sessionid。可点「应用内登录 Instagram」，或从 instagram.com 的 Cookie 里复制。')
     return
   }
@@ -176,6 +176,7 @@ async function handleDownload() {
   addLog(`开始缓存${platform.value === 'twitter' ? '推特' : platform.value === 'instagram' ? 'Instagram' : '微博'}用户：${user_id.value}`, 'info')
   await persistOutputDir(output_dir.value)
   await savePlatformCookie(platform.value, cookie.value)
+  await saveUserCookie(platform.value, user_id.value.trim(), cookie.value)
 
   try {
     if (window.electronAPI) {
@@ -314,19 +315,6 @@ function setupEventListeners() {
     isDownloading.value = false
     addLog(`错误：${data.msg}`, 'error')
     toast.error(data.msg || '下载失败')
-  }))
-  cleanupFns.push(window.electronAPI.onDownloadDone(async (data: DoneResult) => {
-    result.value = {
-      count: data.count,
-      skipped: data.skipped,
-      posts: data.posts,
-    }
-    isDownloading.value = false
-    addLog(formatDoneMessage(data), 'success')
-    if (data.output_dir) {
-      addLog(`保存位置：${data.output_dir}`, 'success')
-    }
-    await refreshOfflinePage(data.userDir)
   }))
 }
 

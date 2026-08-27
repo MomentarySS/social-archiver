@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, session, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, session } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -63,6 +63,7 @@ let downloadQueue = [];          // Array of BatchJob objects
 let currentBatchJob = null;      // { platform, userId, cookie, outputDir, concurrent, namingTemplate }
 let batchProcess = null;         // active subprocess for the current batch job
 let isBatchRunning = false;
+let batchStopRequested = false;
 
 function mimeForAsset(filePath) {
   const ext = path.extname(filePath || '').toLowerCase();
@@ -163,23 +164,6 @@ function fileResponse(filePath, request) {
   );
 }
 
-function registerShortcuts() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-
-  const shortcuts = [
-    { key: 'CommandOrControl+1', tab: 'download' },
-    { key: 'CommandOrControl+2', tab: 'browse' },
-    { key: 'CommandOrControl+3', tab: 'settings' },
-  ];
-
-  for (const { key, tab } of shortcuts) {
-    globalShortcut.register(key, () => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      mainWindow.webContents.send('shortcut:switch-tab', tab);
-    });
-  }
-}
-
 function createWindow() {
   const browserOptions = {
     title: 'Social Archiver',
@@ -230,7 +214,6 @@ app.whenReady().then(() => {
 
   debugLog('App ready, creating main window');
   createWindow();
-  registerShortcuts();
 });
 
 app.on('window-all-closed', () => {
@@ -246,7 +229,6 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   debugLog('Will quit');
-  globalShortcut.unregisterAll();
 });
 
 app.on('activate', () => {
@@ -287,11 +269,21 @@ function buildDownloadArgs(job) {
 }
 
 function processQueue() {
+  if (batchStopRequested) {
+    downloadQueue = [];
+    isBatchRunning = false;
+    currentBatchJob = null;
+    batchProcess = null;
+    batchStopRequested = false;
+    mainWindow?.webContents.send('batch:done', { type: 'batch-stopped' });
+    return;
+  }
+
   if (downloadQueue.length === 0) {
     isBatchRunning = false;
     currentBatchJob = null;
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('batch:done', {});
+      mainWindow.webContents.send('batch:done', { type: 'batch-done' });
     }
     return;
   }
@@ -305,6 +297,7 @@ function processQueue() {
     type: 'user-start',
     userId: job.userId,
     platform: job.platform,
+    queued: downloadQueue.length,
   });
 
   batchProcess = null;
@@ -321,6 +314,7 @@ function processQueue() {
       type: 'user-error',
       userId: job.userId,
       platform: job.platform,
+      queued: downloadQueue.length,
       msg: err.message,
     });
     currentBatchJob = null;
@@ -365,12 +359,19 @@ function processQueue() {
 
   proc.on('close', (code) => {
     const userDir = path.join(job.outputDir, job.platform, job.userId);
+    if (batchStopRequested) {
+      currentBatchJob = null;
+      batchProcess = null;
+      processQueue();
+      return;
+    }
     if (code !== 0) {
       mainWindow?.webContents.send('batch:event', {
         type: 'user-error',
         userId: job.userId,
         platform: job.platform,
         userDir,
+        queued: downloadQueue.length,
         msg: `进程退出（代码 ${code}）`,
       });
     } else {
@@ -379,6 +380,7 @@ function processQueue() {
         userId: job.userId,
         platform: job.platform,
         userDir,
+        queued: downloadQueue.length,
       });
     }
     currentBatchJob = null;
@@ -403,6 +405,7 @@ ipcMain.handle('enqueue-batch-download', async (event, jobs) => {
   if (!Array.isArray(jobs) || jobs.length === 0) {
     return { success: false, error: '没有要下载的用户', queued: 0 };
   }
+  batchStopRequested = false;
   for (const job of jobs) {
     downloadQueue.push(job);
   }
@@ -413,13 +416,17 @@ ipcMain.handle('enqueue-batch-download', async (event, jobs) => {
 });
 
 ipcMain.handle('stop-batch-download', async () => {
+  batchStopRequested = true;
+  downloadQueue = [];
   if (batchProcess) {
     batchProcess.kill();
     batchProcess = null;
+  } else {
+    isBatchRunning = false;
+    currentBatchJob = null;
+    batchStopRequested = false;
+    mainWindow?.webContents.send('batch:done', { type: 'batch-stopped' });
   }
-  downloadQueue = [];
-  isBatchRunning = false;
-  currentBatchJob = null;
   return {};
 });
 
@@ -471,6 +478,7 @@ ipcMain.handle('start-download', async (event, { platform, userId, cookie, outpu
           const event = JSON.parse(line);
           if (event.type === 'done') {
             event.userDir = path.join(outputDir, platform, userId);
+            updateProfileLastUpdate(event.userDir);
           }
           mainWindow?.webContents.send('download:event', event);
         } catch (e) {
@@ -513,12 +521,21 @@ ipcMain.handle('is-downloading', async () => {
   return downloadProcess !== null || isBatchRunning;
 });
 
+function isPathInsideRoot(userPath, rootDir) {
+  const root = path.resolve(rootDir);
+  const target = path.resolve(userPath);
+  const rootCmp = process.platform === 'win32' ? root.toLowerCase() : root;
+  const targetCmp = process.platform === 'win32' ? target.toLowerCase() : target;
+  if (targetCmp === rootCmp) return false;
+  const prefix = rootCmp.endsWith(path.sep) ? rootCmp : rootCmp + path.sep;
+  return targetCmp.startsWith(prefix);
+}
+
 ipcMain.handle('delete-archives', async (event, { paths, rootDir }) => {
   const results = { success: [], failed: [] };
   for (const userPath of paths) {
     try {
-      // Defensive: require paths to be inside rootDir if provided
-      if (rootDir && !userPath.startsWith(path.resolve(rootDir) + path.sep)) {
+      if (rootDir && !isPathInsideRoot(userPath, rootDir)) {
         results.failed.push(userPath);
         continue;
       }
@@ -658,12 +675,36 @@ function findAvatar(userDir) {
   return '';
 }
 
+function isXPost(post) {
+  const platform = String((post && post.platform) || '').toLowerCase();
+  if (platform === 'twitter' || platform === 'x') return true;
+  return /x\.com|twitter\.com/i.test(String((post && post.url) || ''));
+}
+
+function twitterSnowflakeMs(id) {
+  try {
+    const n = BigInt(String(id || ''));
+    if (n < 2n ** 32n) return 0;
+    return Number((n >> 22n) + 1288834974657n);
+  } catch {
+    return 0;
+  }
+}
+
+function hasClockTime(raw) {
+  return /^\d{10,13}$/.test(raw) || /T\d{2}:/.test(raw) || /\d{2}:\d{2}(:\d{2})?/.test(raw);
+}
+
 function postTimeMs(post) {
   const created = String((post && post.created_at) || '').trim();
   const dated = String((post && post.date) || '').trim();
-  const fromCreated = parseTimestamp(created);
-  if (fromCreated) return fromCreated;
-  return parseTimestamp(dated);
+  let parsed = parseTimestamp(created);
+  if (!parsed) parsed = parseTimestamp(dated);
+  if (isXPost(post) && !hasClockTime(created) && !hasClockTime(dated)) {
+    const flake = twitterSnowflakeMs(post.id);
+    if (flake) return flake;
+  }
+  return parsed;
 }
 
 function parseTimestamp(raw) {
@@ -915,7 +956,9 @@ async function startCookieLogin(opts) {
 }
 
 async function tryCookieLogin(opts) {
-  const loginSession = session.fromPartition(opts.partition + '-' + Date.now());
+  const base = String(opts.partition || 'login').replace(/^persist:/, '');
+  const partitionName = `${base}-${Date.now()}`;
+  const loginSession = session.fromPartition(partitionName);
   const loginWindow = new BrowserWindow({
     width: opts.width || 480,
     height: opts.height || 760,
@@ -925,7 +968,7 @@ async function tryCookieLogin(opts) {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
-      partition: opts.partition,
+      partition: partitionName,
       webgl: false,
       backgroundThrottling: false,
     },

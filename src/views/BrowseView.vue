@@ -16,6 +16,7 @@
         @batch-update="handleBatchUpdate"
         @batch-delete="handleBatchDelete"
         @add-user="handleAddUser"
+        @stop-batch="handleStopBatch"
       />
     </aside>
 
@@ -141,6 +142,7 @@ import UserManager from '../components/UserManager.vue'
 import { writeArchiveHtml } from '../utils/archiveHtml.js'
 import { sortPosts } from '../utils/postTime.js'
 import { setAppPlatform } from '../skin.js'
+import { normalizePlatform } from '../constants'
 import {
   cookieForPlatform,
   cookieForUser,
@@ -149,40 +151,7 @@ import {
   saveUserCookie,
 } from '../utils/session.js'
 import { useToast } from '../composables/useToast'
-
-interface UserEntry {
-  name: string
-  path: string
-  platform?: string
-  displayName?: string
-  avatar?: string
-  lastUpdate?: string
-}
-
-interface Pic {
-  filename?: string
-  date_folder?: string
-  abs_path?: string
-  original_url?: string
-  type?: string
-}
-
-interface Post {
-  id?: string
-  platform?: string
-  user_id?: string
-  user_name?: string
-  screen_name?: string
-  text?: string
-  created_at?: string
-  date?: string
-  url?: string
-  source?: string
-  pics?: Pic[]
-  likes?: number
-  comments?: number
-  reposts?: number
-}
+import type { BatchEvent, Post, UserEntry } from '../electron-api.d.ts'
 
 const outputDir = ref('')
 const users = ref<UserEntry[]>([])
@@ -287,7 +256,7 @@ async function scanUsers() {
           }
         })
       )
-      users.value = raw
+      users.value = enriched
       userList.value = enriched
       if (users.value.length) {
         selectedUser.value = users.value[0].path
@@ -334,7 +303,7 @@ async function updateArchive() {
     return
   }
 
-  const platform = skin.value === 'twitter' ? 'twitter' : skin.value === 'instagram' ? 'instagram' : 'weibo'
+  const platform = normalizePlatform(user.platform, skin.value)
   const settings = await window.electronAPI.getSettings()
   let cookie = cookieForUser(settings, platform, user.name)
     || cookieForPlatform(settings, platform)
@@ -419,7 +388,7 @@ async function handleUpdateUser(user: UserEntry) {
     toast.warning('已有缓存任务进行中')
     return
   }
-  const platform = user.platform || skin.value === 'twitter' ? 'twitter' : skin.value === 'instagram' ? 'instagram' : 'weibo'
+  const platform = normalizePlatform(user.platform, skin.value)
   const settings = await window.electronAPI!.getSettings()
   let cookie = cookieForUser(settings, platform, user.name)
 
@@ -429,14 +398,23 @@ async function handleUpdateUser(user: UserEntry) {
   }
 
   updating.value = true
-  await window.electronAPI!.startDownload({
-    platform,
-    userId: user.name,
-    cookie,
-    outputDir: outputDir.value,
-    concurrent: settings.concurrent,
-    namingTemplate: settings.naming_template,
-  })
+  try {
+    const res = await window.electronAPI!.startDownload({
+      platform,
+      userId: user.name,
+      cookie,
+      outputDir: outputDir.value,
+      concurrent: settings.concurrent,
+      namingTemplate: settings.naming_template,
+    })
+    if (!res.success) {
+      updating.value = false
+      toast.error(res.error || '无法开始更新')
+    }
+  } catch (e) {
+    updating.value = false
+    toast.error('无法开始更新')
+  }
 }
 
 async function handleDeleteUser(user: UserEntry) {
@@ -465,7 +443,7 @@ async function handleBatchUpdate(selected: UserEntry[]) {
   const settings = await window.electronAPI.getSettings()
   const jobs = await Promise.all(
     selected.map(async (user) => {
-      const platform = user.platform || 'twitter'
+      const platform = normalizePlatform(user.platform, 'weibo')
       const cookie = cookieForUser(settings, platform, user.name)
       if (!hasUsableCookie(platform, cookie)) {
         return null
@@ -561,48 +539,49 @@ async function handleAddUser(data: { platform: string; userId: string; cookie: s
 function setupBatchListeners() {
   if (!window.electronAPI) return
   cleanupFns.push(
-    window.electronAPI.onBatchEvent(async (event: { type?: string; userId?: string; platform?: string; userDir?: string; count?: number; msg?: string }) => {
-      // 'done' = backend succeeded; 'error' = backend failed; both mean one job finished
-      if (event.type === 'done' || event.type === 'error') {
-        batchCompleted.value++
-        if (event.userDir) await refreshCurrentArchive(event.userDir)
+    window.electronAPI.onBatchEvent(async (event: BatchEvent) => {
+      if (event.type === 'done' && event.userDir) {
+        await refreshCurrentArchive(event.userDir)
+        return
       }
-    })
-  )
-  cleanupFns.push(
-    window.electronAPI.onBatchEvent(async (event: { type?: string; userId?: string; platform?: string; userDir?: string }) => {
-      // 'user-done' / 'user-error' = job completion reported by processQueue
-      if (event.type === 'user-done' || event.type === 'user-error') {
+      if (event.type === 'user-start' || event.type === 'user-done' || event.type === 'user-error') {
         batchStatus.value = {
-          queued: Math.max(0, batchStatus.value.queued - 1),
+          queued: typeof event.queued === 'number' ? event.queued : batchStatus.value.queued,
           running: true,
           currentUserId: event.userId,
           currentPlatform: event.platform,
         }
-        if (event.userDir) await refreshCurrentArchive(event.userDir)
-      }
-      // 'user-start' = new job picked up; queued was decremented on user-done/user-error
-      if (event.type === 'user-start') {
-        batchStatus.value = {
-          queued: Math.max(0, batchStatus.value.queued - 1),
-          running: true,
-          currentUserId: event.userId,
-          currentPlatform: event.platform,
+        if (event.type === 'user-done' || event.type === 'user-error') {
+          batchCompleted.value++
+          if (event.userDir) await refreshCurrentArchive(event.userDir)
         }
+        return
       }
-    })
-  )
-  cleanupFns.push(
-    window.electronAPI.onBatchEvent((event: { type?: string }) => {
       if (event.type === 'batch-done') {
         batchRunning.value = false
         batchCompleted.value = 0
         batchTotal.value = 0
         batchStatus.value = { queued: 0, running: false }
         toast.success('批量缓存全部完成')
+        return
+      }
+      if (event.type === 'batch-stopped') {
+        batchRunning.value = false
+        batchCompleted.value = 0
+        batchTotal.value = 0
+        batchStatus.value = { queued: 0, running: false }
+        toast.info('已停止批量缓存')
       }
     })
   )
+}
+
+async function handleStopBatch() {
+  try {
+    await window.electronAPI?.stopBatchDownload()
+  } catch (e) {
+    toast.error('停止失败')
+  }
 }
 
 async function refreshCurrentArchive(userDir?: string, opts?: { silent?: boolean }) {
@@ -621,7 +600,7 @@ async function refreshCurrentArchive(userDir?: string, opts?: { silent?: boolean
         }
       })
     )
-    users.value = raw
+    users.value = enriched
     userList.value = enriched
     if (keep && users.value.some((u) => u.path === keep)) {
       selectedUser.value = keep

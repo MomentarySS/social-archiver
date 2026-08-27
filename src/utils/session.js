@@ -23,7 +23,7 @@ export function hasUsableCookie(platform, cookie) {
   if (!value) return false
   if (platform === 'twitter') return /(?:^|;\s*)auth_token=/.test(value)
   if (platform === 'instagram') return /(?:^|;\s*)sessionid=/.test(value)
-  return value.length > 8
+  return /\bSUB=/.test(value)
 }
 
 export async function patchSettings(partial) {

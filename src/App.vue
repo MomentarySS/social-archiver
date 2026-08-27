@@ -44,22 +44,26 @@ import { toastItems } from './composables/useToast'
 
 const activeTab = ref<'download' | 'browse' | 'settings'>('download')
 
-function handleShortcut(tab: string) {
-  if (tab === 'download' || tab === 'browse' || tab === 'settings') {
-    activeTab.value = tab
+function handleShortcut(event: KeyboardEvent) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+  if (event.key === '1') {
+    event.preventDefault()
+    activeTab.value = 'download'
+  } else if (event.key === '2') {
+    event.preventDefault()
+    activeTab.value = 'browse'
+  } else if (event.key === '3') {
+    event.preventDefault()
+    activeTab.value = 'settings'
   }
 }
 
-let cleanupShortcut: (() => void) | undefined
-
 onMounted(() => {
-  if (window.electronAPI?.onShortcut) {
-    cleanupShortcut = window.electronAPI.onShortcut(handleShortcut)
-  }
+  window.addEventListener('keydown', handleShortcut)
 })
 
 onUnmounted(() => {
-  cleanupShortcut?.()
+  window.removeEventListener('keydown', handleShortcut)
 })
 </script>
 

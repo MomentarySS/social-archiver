@@ -58,7 +58,7 @@ describe('hasUsableCookie', () => {
   it('returns true for non-empty cookie strings', () => {
     expect(hasUsableCookie('twitter', 'auth_token=abc')).toBe(true)
     expect(hasUsableCookie('instagram', 'sessionid=xyz')).toBe(true)
-    expect(hasUsableCookie('weibo', 'some_cookie_value')).toBe(true)
+    expect(hasUsableCookie('weibo', 'SUB=abc123456')).toBe(true)
   })
 
   it('returns false for empty or falsy values', () => {
@@ -68,13 +68,10 @@ describe('hasUsableCookie', () => {
   })
 
   it('returns false for strings without required cookie marker', () => {
-    // Twitter requires auth_token marker
     expect(hasUsableCookie('twitter', 'just_some_text')).toBe(false)
-    // Instagram requires sessionid marker
     expect(hasUsableCookie('instagram', 'cookie_without_sessionid')).toBe(false)
-    // Cookie must be > 8 chars (weibo)
     expect(hasUsableCookie('weibo', 'short=12')).toBe(false)
-    expect(hasUsableCookie('weibo', 'A=123456')).toBe(false) // exactly 8 chars — not > 8
-    expect(hasUsableCookie('weibo', 'A=1234567')).toBe(true) // 9 chars
+    expect(hasUsableCookie('weibo', 'some_cookie_value')).toBe(false)
+    expect(hasUsableCookie('weibo', 'SUB=ok')).toBe(true)
   })
 })
