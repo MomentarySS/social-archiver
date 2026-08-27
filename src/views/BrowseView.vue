@@ -147,7 +147,6 @@ import {
   hasUsableCookie,
   savePlatformCookie,
   saveUserCookie,
-  userCookieKey,
 } from '../utils/session.js'
 import { useToast } from '../composables/useToast'
 
@@ -201,7 +200,7 @@ const toast = useToast()
 const batchRunning = ref(false)
 const batchCompleted = ref(0)
 const batchTotal = ref(0)
-const batchStatus = ref({ queued: 0, running: false })
+const batchStatus = ref<{ queued: number; running: boolean; currentUserId?: string; currentPlatform?: string }>({ queued: 0, running: false })
 
 // userList = users with lastUpdate populated from _profile.json
 const userList = ref<UserEntry[]>([])
@@ -281,7 +280,7 @@ async function scanUsers() {
       const enriched = await Promise.all(
         raw.map(async (u: UserEntry) => {
           try {
-            const lastUpdate = await window.electronAPI.getUserLastUpdate(u.path)
+            const lastUpdate = await window.electronAPI?.getUserLastUpdate(u.path)
             return { ...u, lastUpdate: lastUpdate || undefined }
           } catch {
             return u
@@ -609,12 +608,13 @@ function setupBatchListeners() {
 async function refreshCurrentArchive(userDir?: string, opts?: { silent?: boolean }) {
   if (!window.electronAPI || !outputDir.value) return
   const keep = userDir || selectedUser.value
+  const api = window.electronAPI
   try {
-    const raw = await window.electronAPI.scanArchives(outputDir.value)
+    const raw = await api.scanArchives(outputDir.value)
     const enriched = await Promise.all(
       raw.map(async (u: UserEntry) => {
         try {
-          const lastUpdate = await window.electronAPI.getUserLastUpdate(u.path)
+          const lastUpdate = await api.getUserLastUpdate(u.path)
           return { ...u, lastUpdate: lastUpdate || undefined }
         } catch {
           return u

@@ -9,8 +9,8 @@
     </div>
     <div v-if="progress" class="details">
       <div><span>当前</span><b>{{ progress.file || '处理中' }}</b></div>
-      <div v-if="progress.total && progress.total > progress.current">
-        <span>媒体</span><b>{{ progress.current || 0 }} / {{ progress.total || 0 }}</b>
+      <div v-if="progress.total && progress.total > (progress.current ?? 0)">
+        <span>媒体</span><b>{{ (progress.current ?? 0) }} / {{ progress.total }}</b>
       </div>
       <div v-if="postsCount">
         <span>帖子</span><b>{{ postsCount }} 条</b>
@@ -32,9 +32,9 @@ const props = defineProps<{
 
 const barPercent = computed(() => {
   if (!props.progress) return 0
-  if (props.progress.total && props.progress.total > props.progress.current) {
-    return (props.progress.current / props.progress.total) * 100
-  }
+  const cur = props.progress.current ?? 0
+  const tot = props.progress.total ?? 0
+  if (tot > cur) return (cur / tot) * 100
   return 100
 })
 
