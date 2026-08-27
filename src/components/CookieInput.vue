@@ -13,6 +13,9 @@
           autocomplete="off"
           @input="emitTwitterCookie"
         />
+        <span class="cookie-hint" :class="authToken ? 'ok' : 'miss'">
+          {{ authToken ? '✓ auth_token 已填' : '✗ auth_token 未填' }}
+        </span>
       </label>
       <label class="sa-field">
         <span>ct0</span>
@@ -24,6 +27,9 @@
           autocomplete="off"
           @input="emitTwitterCookie"
         />
+        <span class="cookie-hint" :class="ct0 ? 'ok' : 'miss'">
+          {{ ct0 ? '✓ ct0 已填' : '✗ ct0 未填' }}
+        </span>
       </label>
       <div class="sa-row cookie-actions">
         <button class="sa-btn sa-btn-primary" type="button" :disabled="loggingIn" @click="handleTwitterLogin">
@@ -52,6 +58,9 @@
           autocomplete="off"
           @input="emitInstagramCookie"
         />
+        <span class="cookie-hint" :class="sessionid ? 'ok' : 'miss'">
+          {{ sessionid ? '✓ sessionid 已填' : '✗ sessionid 未填' }}
+        </span>
       </label>
       <div class="sa-row cookie-actions">
         <button class="sa-btn sa-btn-primary" type="button" :disabled="loggingIn" @click="handleInstagramLogin">
@@ -77,6 +86,9 @@
           placeholder="粘贴 m.weibo.cn 的完整 Cookie（需包含 SUB）"
           @input="onChange(($event.target as HTMLTextAreaElement).value)"
         />
+        <span class="cookie-hint" :class="weiboHasSub ? 'ok' : 'miss'">
+          {{ weiboHasSub ? '✓ SUB 已检测到' : '✗ SUB 未检测到' }}
+        </span>
       </label>
       <div class="sa-row cookie-actions">
         <button class="sa-btn sa-btn-primary" type="button" :disabled="loggingIn" @click="handleWeiboLogin">
@@ -97,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useToast } from '../composables/useToast'
 
 const props = defineProps<{
@@ -115,6 +127,8 @@ const ct0 = ref('')
 const extraCookies = ref('')
 const sessionid = ref('')
 const toast = useToast()
+
+const weiboHasSub = computed(() => /\bSUB=/.test(props.modelValue || ''))
 
 watch(
   () => props.platform,
@@ -259,5 +273,19 @@ async function openSite(url: string, message: string) {
 
 .cookie-actions {
   margin-bottom: 4px;
+}
+
+.cookie-hint {
+  font-size: 12px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.cookie-hint.ok {
+  color: #52c41a;
+}
+
+.cookie-hint.miss {
+  color: #ff4d4f;
 }
 </style>
