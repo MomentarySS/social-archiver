@@ -25,7 +25,7 @@ function formatDateForHtml(raw) {
   return clean
 }
 
-function detectSkin(posts, platform) {
+export function detectSkin(posts, platform) {
   const value = String(platform || posts[0]?.platform || '').toLowerCase()
   if (value === 'twitter' || value === 'x') return 'twitter'
   if (value === 'instagram') return 'instagram'
