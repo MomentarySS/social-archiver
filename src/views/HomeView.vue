@@ -60,6 +60,7 @@
         :is-downloading="isDownloading"
         :progress="progress"
         :result="result"
+        :posts-count="postsCount"
       />
 
       <LogPanel :logs="logs" @clear="clearLogs" />
@@ -125,6 +126,7 @@ const namingTemplate = ref('{post_id}_{index}')
 const isDownloading = ref(false)
 const progress = ref<Progress | null>(null)
 const result = ref<Result | null>(null)
+const postsCount = ref<number | undefined>(undefined)
 const logs = ref<LogEntry[]>([])
 const cleanupFns: Array<() => void> = []
 const settingsReady = ref(false)
@@ -180,6 +182,7 @@ async function handleDownload() {
   // Reset state
   progress.value = null
   result.value = null
+  postsCount.value = undefined
   isDownloading.value = true
   logs.value = []
 
@@ -304,6 +307,9 @@ async function handleDownloadEvent(event: DownloadEvent) {
   } else if (type === 'status') {
     if (event.msg) {
       addLog(event.msg, 'info')
+      // 解析微博中间状态「已缓存 N 条原创」提取帖子计数
+      const m = event.msg.match(/已缓存\s*(\d+)\s*条原创/)
+      if (m) postsCount.value = parseInt(m[1], 10)
     }
   }
 }

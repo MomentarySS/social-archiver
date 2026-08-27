@@ -2,14 +2,19 @@
   <div v-if="isDownloading || progress || result" class="download-progress">
     <div class="progress-header">
       <span>{{ statusText }}</span>
-      <span v-if="progress" class="percent">{{ Math.round(progress.percent || 0) }}%</span>
+      <span v-if="progress && barPercent > 0" class="percent">{{ Math.round(barPercent) }}%</span>
     </div>
-    <div class="bar" role="progressbar" :aria-valuenow="Math.round(progress?.percent || 0)" aria-valuemin="0" aria-valuemax="100">
-      <i :style="{ transform: `scaleX(${Math.min(1, (progress?.percent || 0) / 100)})` }" />
+    <div class="bar" role="progressbar" :aria-valuenow="Math.round(barPercent)" aria-valuemin="0" aria-valuemax="100">
+      <i :style="{ transform: `scaleX(${Math.min(1, barPercent / 100)})` }" />
     </div>
     <div v-if="progress" class="details">
       <div><span>当前</span><b>{{ progress.file || '处理中' }}</b></div>
-      <div><span>进度</span><b>{{ progress.current || 0 }} / {{ progress.total || 0 }}</b></div>
+      <div v-if="progress.total && progress.total > progress.current">
+        <span>媒体</span><b>{{ progress.current || 0 }} / {{ progress.total || 0 }}</b>
+      </div>
+      <div v-if="postsCount">
+        <span>帖子</span><b>{{ postsCount }} 条</b>
+      </div>
     </div>
     <p v-if="result" class="result" :class="result.error ? 'is-error' : 'is-ok'">{{ resultMessage }}</p>
   </div>
@@ -22,7 +27,16 @@ const props = defineProps<{
   isDownloading: boolean
   progress: { percent?: number; file?: string; current?: number; total?: number } | null
   result: { count?: number; skipped?: number; posts?: number; error?: string } | null
+  postsCount?: number
 }>()
+
+const barPercent = computed(() => {
+  if (!props.progress) return 0
+  if (props.progress.total && props.progress.total > props.progress.current) {
+    return (props.progress.current / props.progress.total) * 100
+  }
+  return 100
+})
 
 const statusText = computed(() => {
   if (props.result?.error) return '出错了'
