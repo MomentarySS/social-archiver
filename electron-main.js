@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, session, globalShortcut } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -155,6 +155,23 @@ function fileResponse(filePath, request) {
   );
 }
 
+function registerShortcuts() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  const shortcuts = [
+    { key: 'CommandOrControl+1', tab: 'download' },
+    { key: 'CommandOrControl+2', tab: 'browse' },
+    { key: 'CommandOrControl+3', tab: 'settings' },
+  ];
+
+  for (const { key, tab } of shortcuts) {
+    globalShortcut.register(key, () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.send('shortcut:switch-tab', tab);
+    });
+  }
+}
+
 function createWindow() {
   const browserOptions = {
     title: 'Social Archiver',
@@ -205,6 +222,7 @@ app.whenReady().then(() => {
 
   debugLog('App ready, creating main window');
   createWindow();
+  registerShortcuts();
 });
 
 app.on('window-all-closed', () => {
@@ -220,6 +238,7 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   debugLog('Will quit');
+  globalShortcut.unregisterAll();
 });
 
 app.on('activate', () => {
