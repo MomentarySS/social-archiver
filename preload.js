@@ -40,4 +40,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('download:done', handler);
     return () => ipcRenderer.removeListener('download:done', handler);
   },
+  onShortcut: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('shortcut:switch-tab', handler);
+    return () => ipcRenderer.removeListener('shortcut:switch-tab', handler);
+  },
 });

@@ -35,14 +35,32 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import HomeView from './views/HomeView.vue'
 import BrowseView from './views/BrowseView.vue'
 import SettingsView from './views/SettingsView.vue'
 import SaToast from './components/SaToast.vue'
 import { toastItems } from './composables/useToast'
 
-const activeTab = ref('download')
+const activeTab = ref<'download' | 'browse' | 'settings'>('download')
+
+function handleShortcut(tab: string) {
+  if (tab === 'download' || tab === 'browse' || tab === 'settings') {
+    activeTab.value = tab
+  }
+}
+
+let cleanupShortcut: (() => void) | undefined
+
+onMounted(() => {
+  if (window.electronAPI?.onShortcut) {
+    cleanupShortcut = window.electronAPI.onShortcut(handleShortcut)
+  }
+})
+
+onUnmounted(() => {
+  cleanupShortcut?.()
+})
 </script>
 
 <style scoped>

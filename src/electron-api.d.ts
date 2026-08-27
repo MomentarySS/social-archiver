@@ -32,6 +32,7 @@ export interface ElectronAPI {
   onDownloadLog: (callback: (data: DownloadEvent) => void) => () => void
   onDownloadError: (callback: (data: DownloadEvent) => void) => () => void
   onDownloadDone: (callback: (data: DownloadEvent) => void) => () => void
+  onShortcut: (callback: (tab: string) => void) => () => void
 }
 
 export interface Settings {
