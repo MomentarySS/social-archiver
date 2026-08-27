@@ -218,7 +218,7 @@ const skin = computed(() => {
 })
 
 const allChecked = computed(() =>
-  props.users.length > 0 && props.users.every(u => checkedUsers.has(u.path))
+  props.users.length > 0 && props.users.every(u => checkedUsers.value.has(u.path))
 )
 
 const runningUser = computed(() => props.batchStatus.currentUserId || '')

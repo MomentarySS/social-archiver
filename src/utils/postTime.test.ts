@@ -35,7 +35,7 @@ describe('sortPosts', () => {
       { id: 'b', created_at: T2 },
     ]
     const result = sortPosts(posts, 'newest')
-    expect(result.map(p => p.id)).toEqual(['a', 'b', 'c'])
+    expect(result.map((p: { id: string }) => p.id)).toEqual(['a', 'b', 'c'])
   })
 
   it('sorts oldest first when order is "oldest"', () => {
@@ -45,7 +45,7 @@ describe('sortPosts', () => {
       { id: 'b', created_at: T2 },
     ]
     const result = sortPosts(posts, 'oldest')
-    expect(result.map(p => p.id)).toEqual(['c', 'b', 'a'])
+    expect(result.map((p: { id: string }) => p.id)).toEqual(['c', 'b', 'a'])
   })
 
   it('does not mutate the original array', () => {
