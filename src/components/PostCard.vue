@@ -547,8 +547,8 @@ function formatRichText(raw: string, kind: 'weibo' | 'twitter' | 'instagram') {
     text = text.replace(/#([^#\n]{1,40})#/g, '<span class="wb-topic">#$1#</span>')
     text = text.replace(/@([A-Za-z0-9_\u4e00-\u9fff-]+)/g, '<span class="wb-at">@$1</span>')
   } else if (kind === 'instagram') {
-    text = text.replace(/(^|\s)#([A-Za-z0-9_\u4e00-\u9fff]+)/g, '$1<span class="wb-topic">#$2</span>')
-    text = text.replace(/(^|\s)@([A-Za-z0-9_.]+)/g, '$1<span class="wb-at">@$2</span>')
+    text = text.replace(/(^|\s)#([A-Za-z0-9_\u4e00-\u9fff]+)/g, '$1<span class="ig-topic">#$2</span>')
+    text = text.replace(/(^|\s)@([A-Za-z0-9_.]+)/g, '$1<span class="ig-at">@$2</span>')
   } else {
     text = text.replace(/(^|\s)#([A-Za-z0-9_\u4e00-\u9fff]+)/g, '$1<span class="x-hash">#$2</span>')
     text = text.replace(/(^|\s)@([A-Za-z0-9_]+)/g, '$1<span class="x-at">@$2</span>')
@@ -636,6 +636,11 @@ function pad(n: number) {
 .wb-text :deep(.wb-topic),
 .wb-text :deep(.wb-at) {
   color: #eb7350;
+}
+
+.wb-text :deep(.ig-topic),
+.wb-text :deep(.ig-at) {
+  color: #0095f6;
 }
 
 .wb-media {
