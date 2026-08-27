@@ -1,0 +1,56 @@
+{
+  "name": "social-archiver",
+  "private": true,
+  "version": "0.4.1",
+  "main": "electron-main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron --disable-gpu --disable-features=WebGL,WebGL2,WebGLRenderingContext .\"",
+    "electron:build": "python scripts/write_icon.py && npm run build && python scripts/build_backend.py && electron-builder --win"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/tsconfig": "^0.9.1",
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
+    "electron": "^34.5.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0",
+    "vue-tsc": "^3.3.8",
+    "wait-on": "^9.1.0"
+  },
+  "build": {
+    "appId": "com.social-archiver.app",
+    "productName": "Social Archiver",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron-main.js",
+      "preload.js",
+      "icons/icon.ico",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build-backend/backend",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "target": [
+        "zip"
+      ],
+      "icon": "icons/icon.ico"
+    },
+    "artifactName": "SocialArchiver-${version}-win.${ext}"
+  }
+}
