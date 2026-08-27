@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,10 @@ MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4", ".mov", ".webm",
 
 
 def _gallery_dl_cmd(*extra: str) -> List[str]:
+    # Priority: system gallery-dl (always latest) > frozen bundled gallery-dl > dev mode
+    system_gallery_dl = shutil.which("gallery-dl")
+    if system_gallery_dl:
+        return [system_gallery_dl, *extra]
     if getattr(sys, "frozen", False):
         return [sys.executable, "--run-gallery-dl", *extra]
     return [sys.executable, "-m", "gallery_dl", *extra]
