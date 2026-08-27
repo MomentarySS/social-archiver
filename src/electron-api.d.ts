@@ -93,27 +93,12 @@ export interface UserEntry {
   lastUpdate?: string
 }
 
-export interface DownloadEvent {
-  type?: string
-  msg?: string
-  file?: string
-  percent?: number
-  current?: number
-  total?: number
-  count?: number
-  skipped?: number
-  posts?: number
-  output_dir?: string
-  userDir?: string
-}
-
 // Discriminated union for the download:event IPC channel
 export type ProgressEvent = { type: 'progress'; file: string; percent: number; current: number; total: number }
 export type DoneResult    = { type: 'done';    count: number; skipped: number; posts: number; output_dir?: string; userDir?: string }
 export type ErrorResult   = { type: 'error';  msg: string }
-export type StatusEvent  = { type: 'status'; msg: string }
-export type UnknownEvent  = { type?: string; [key: string]: unknown }
-export type DownloadEvent = ProgressEvent | DoneResult | ErrorResult | StatusEvent | UnknownEvent
+export type StatusEvent   = { type: 'status'; msg: string }
+export type DownloadEvent = ProgressEvent | DoneResult | ErrorResult | StatusEvent
 
 export interface LogEvent {
   msg?: string

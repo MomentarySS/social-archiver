@@ -182,7 +182,7 @@ components:
 
 The archive should look like the site it came from. Weibo posts sit on pale paper under Weibo Saffron; X posts sit in black under Sky Link; Instagram posts sit on app paper under IG Blue. Switching accounts switches rooms. Cache, browse, and settings share that room: picking a platform on the cache page (or opening an archive) paints the whole shell.
 
-Density is source-faithful: 15px body, 600px column, 1px hairlines, circular avatars, Weibo nine-grid, X 16px media, pill fields and actions. Offline `index.html` mirrors the same reading experience (Instagram archives currently export through the light Weibo-style layout). PRODUCT.md names the product Social Archiver; do not revive the old Media Harvester string.
+Density is source-faithful: 15px body, 600px column, 1px hairlines, circular avatars, Weibo nine-grid, X 16px media, pill fields and actions. Offline `index.html` mirrors the same reading experience: Weibo light, X dark, or Instagram light (`igArchiveHtml` — brand gradient cover, IG Blue links, `#fafafa` paper). PRODUCT.md names the product Social Archiver; do not revive the old Media Harvester string.
 
 **Key Characteristics:**
 - One source skin at a time (Weibo light, X dark, or Instagram light)
@@ -288,7 +288,7 @@ Source-faithful: if Weibo or X would show it that way, so does the archive.
 Thin product tabs in the sticky app bar. Weibo: paper strip, Saffron underline on the active pill. X: void strip, Sky Link underline. Brand lockup is “Social Archiver” plus 社交存档.
 
 ### Signature: Timeline post
-Left avatar, right body. Weibo: name + optional V, body with topic color, nine-grid, then time / 来自 / 查看原文. Live photos occupy one cell: still JPEG, hover plays the motion, `LIVE` badge bottom-left (10px/700, 18px tall, `rgba(0,0,0,0.55)`). Regular video cells are 16:9 with native controls. X: name + @handle + · time + 打开原文, body with Sky Link entities, rounded media; GIFs and videos use controls, never a LIVE badge. If the window cannot decode a file, the cell becomes a short fallback (white copy on `#111`) with a 28px primary pill — Weibo Saffron 「用系统播放器打开」 / 「打开实况」, Sky Link on X. No live 转发/评论/赞 or reply/repost/like row — those are not actionable in a local archive.
+Left avatar, right body. Weibo: name + optional V, body with topic color (`#eb7350` for @/#), nine-grid, then time / 来自 / 查看原文. Live photos occupy one cell: still JPEG, hover plays the motion, `LIVE` badge bottom-left (10px/700, 18px tall, `rgba(0,0,0,0.55)`). Regular video cells are 16:9 with native controls. X: name + @handle + · time + 打开原文, body with Sky Link entities, rounded media; GIFs and videos use controls, never a LIVE badge. Instagram: name + @handle + time, body with IG Blue (`#0095f6`) @/# entities, square grid, no LIVE badge. If the window cannot decode a file, the cell becomes a short fallback with `color: inherit` on X dark — Weibo Saffron 「用系统播放器打开」 / 「打开实况」, Sky Link on X. No live 转发/评论/赞 or reply/repost/like row — those are not actionable in a local archive.
 
 ### Signature: Profile header
 120px cover (Weibo Saffron→avatar wash, X banner gray, Instagram brand gradient), overlapping circular avatar from `_avatar.*` or the first letter of the display name, 20px/800 name, 13px muted id line (Weibo `微博 / id`, X and Instagram `@handle`), then an 8px paper band (Weibo, Instagram) or hairline (X).
@@ -299,7 +299,7 @@ Left avatar, right body. Weibo: name + optional V, body with topic color, nine-g
 - **Do** switch the entire app shell (ground, tabs, pills, fields, posts, selection) with the active skin.
 - **Do** keep the feed at 600px and posts flush, divided by hairlines.
 - **Do** use Weibo Saffron, Sky Link, and IG Blue as the only primary fills in their rooms.
-- **Do** match offline HTML to the same skins.
+- **Do** match offline HTML to the same skins (Weibo / X / Instagram each export their own room).
 
 ### Don't:
 - **Don't** carry the purple `#667eea–#764ba2` header or Element primary `#409eff` into cache, browse, settings, or export.
