@@ -752,6 +752,7 @@ function pad(n: number) {
 
 .video-fallback p {
   margin: 0;
+  color: inherit;
 }
 
 .video-fallback button,
