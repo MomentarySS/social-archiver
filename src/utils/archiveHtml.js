@@ -36,13 +36,29 @@ export function detectSkin(posts, platform) {
   return 'weibo'
 }
 
+function highlightEntities(escapedText, skin) {
+  if (skin === 'weibo') {
+    return escapedText
+      .replace(/#([^#\n]{1,40})#/g, '<span class="topic">#$1#</span>')
+      .replace(/@([A-Za-z0-9_\u4e00-\u9fff-]+)/g, '<span class="at">@$1</span>')
+  }
+  if (skin === 'instagram') {
+    return escapedText
+      .replace(/(^|\s)#([A-Za-z0-9_\u4e00-\u9fff]+)/g, '$1<span class="topic">#$2</span>')
+      .replace(/(^|\s)@([A-Za-z0-9_.]+)/g, '$1<span class="at">@$2</span>')
+  }
+  return escapedText
+    .replace(/(^|\s)#([A-Za-z0-9_\u4e00-\u9fff]+)/g, '$1<span class="hash">#$2</span>')
+    .replace(/(^|\s)@([A-Za-z0-9_]+)/g, '$1<span class="at">@$2</span>')
+}
+
 export function buildArchiveHtml({ posts, userName, handle, platform }) {
   const name = userName || handle || 'user'
   const account = String(handle || '').replace(/^@/, '')
   const ordered = sortPosts(posts || [], 'newest')
-  const isX = detectSkin(ordered, platform) === 'twitter'
+  const skin = detectSkin(ordered, platform)
   const body = ordered.map((post) => {
-    const text = escapeHtml(stripHtml(post.text || '')).replace(/\n/g, '<br/>')
+    const text = highlightEntities(escapeHtml(stripHtml(post.text || '')), skin).replace(/\n/g, '<br/>')
     const date = escapeHtml(formatDateForHtml(post.created_at || post.date || ''))
     const ts = postTimeMs(post)
     const idAttr = escapeHtml(String(post.id || ''))
@@ -67,13 +83,22 @@ export function buildArchiveHtml({ posts, userName, handle, platform }) {
       })
       .join('')
     const count = media.length
-    if (isX) {
+    if (skin === 'twitter') {
       return `
       <article class="post" data-ts="${ts}" data-id="${idAttr}">
         <div class="name">${escapeHtml(post.user_name || name)} <span class="handle">@${escapeHtml(post.screen_name || account)}</span> · ${date}</div>
         ${text ? `<p class="text">${text}</p>` : ''}
         <div class="images n${count}">${images}</div>
         ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">打开原文</a>` : ''}
+      </article>`
+    }
+    if (skin === 'instagram') {
+      return `
+      <article class="post" data-ts="${ts}" data-id="${idAttr}">
+        <div class="name">${escapeHtml(post.user_name || name)} <span class="handle">@${escapeHtml(post.screen_name || account)}</span> · ${date}</div>
+        ${text ? `<p class="text">${text}</p>` : ''}
+        <div class="images n${count}">${images}</div>
+        ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">查看原文</a>` : ''}
       </article>`
     }
     return `
@@ -85,9 +110,9 @@ export function buildArchiveHtml({ posts, userName, handle, platform }) {
       </article>`
   }).join('\n')
 
-  return isX
+  return skin === 'twitter'
     ? twitterArchiveHtml(name, account, body, ordered.length)
-    : detectSkin(ordered, platform) === 'instagram'
+    : skin === 'instagram'
     ? igArchiveHtml(name, account, body, ordered.length)
     : weiboArchiveHtml(name, body, ordered.length)
 }
@@ -119,6 +144,7 @@ function weiboArchiveHtml(userName, body, count) {
   .post { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; }
   .name { font-weight: 700; font-size: 15px; }
   .text { font-size: 15px; line-height: 1.6; margin: 6px 0 8px; }
+  .text .topic, .text .at { color: #eb7350; }
   .images { display: grid; gap: 4px; max-width: 360px; }
   .images.n1 { grid-template-columns: 1fr; max-width: 260px; }
   .images.n2, .images.n4 { grid-template-columns: 1fr 1fr; }
@@ -172,6 +198,7 @@ function twitterArchiveHtml(userName, handle, body, count) {
   .post { padding: 12px 16px; border-bottom: 1px solid #2f3336; }
   .name { font-weight: 700; }
   .text { font-size: 15px; line-height: 1.5; margin: 6px 0 10px; }
+  .text .hash, .text .at { color: #1d9bf0; }
   .images { display: grid; gap: 2px; border: 1px solid #2f3336; border-radius: 16px; overflow: hidden; }
   .images.n1 { grid-template-columns: 1fr; }
   .images.n2, .images.n4 { grid-template-columns: 1fr 1fr; }
@@ -224,6 +251,8 @@ function igArchiveHtml(userName, handle, body, count) {
   .post { padding: 12px 16px; border-bottom: 1px solid #efefef; }
   .name { font-weight: 700; font-size: 15px; }
   .text { font-size: 15px; line-height: 1.6; margin: 6px 0 8px; }
+  .text .topic, .text .at { color: #0095f6; }
+  .handle { color: #8e8e8e; font-weight: 400; }
   .images { display: grid; gap: 4px; max-width: 360px; }
   .images.n1 { grid-template-columns: 1fr; max-width: 260px; }
   .images.n2, .images.n4 { grid-template-columns: 1fr 1fr; }

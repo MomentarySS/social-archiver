@@ -35,7 +35,7 @@
           autocomplete="off"
         />
       </div>
-      <div v-if="addForm.platform !== 'weibo'" class="cookie-hint-row">
+      <div v-if="addForm.cookie.trim()" class="cookie-hint-row">
         <span class="cookie-hint" :class="addFormValid ? 'ok' : 'miss'">
           {{ addFormValid ? '✓ Cookie 格式正确' : '✗ 缺少必需字段' }}
         </span>
@@ -91,11 +91,11 @@
           <button
             class="ghost-btn um-action-btn"
             type="button"
-            :disabled="batchRunning || runningUser === user.path"
+            :disabled="batchRunning || isRunningUser(user)"
             :title="`更新 ${user.displayName || user.name}`"
             @click="emit('update-user', user)"
           >
-            {{ runningUser === user.path ? '…' : '更新' }}
+            {{ isRunningUser(user) ? '…' : '更新' }}
           </button>
           <button
             class="ghost-btn um-action-btn danger"
@@ -147,6 +147,9 @@
       <div class="batch-bar">
         <div class="batch-bar-fill" :style="{ width: batchPercent + '%' }"></div>
       </div>
+      <div class="um-form-row um-form-actions">
+        <button class="ghost-btn" type="button" @click="emit('stop-batch')">停止</button>
+      </div>
     </div>
 
     <!-- Delete Confirm Dialog -->
@@ -167,15 +170,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-
-interface UserEntry {
-  name: string
-  path: string
-  platform?: string
-  displayName?: string
-  avatar?: string
-  lastUpdate?: string
-}
+import { hasUsableCookie } from '../utils/session.js'
+import type { UserEntry } from '../electron-api.d.ts'
 
 interface BatchStatus {
   queued: number
@@ -201,6 +197,7 @@ const emit = defineEmits<{
   (e: 'batch-update', users: UserEntry[]): void
   (e: 'batch-delete', paths: string[]): void
   (e: 'add-user', data: { platform: string; userId: string; cookie: string }): void
+  (e: 'stop-batch'): void
 }>()
 
 // ─── State ────────────────────────────────────────────────────────
@@ -223,9 +220,20 @@ const allChecked = computed(() =>
 
 const runningUser = computed(() => props.batchStatus.currentUserId || '')
 
+const isRunningUser = (user: UserEntry) =>
+  Boolean(
+    runningUser.value
+    && user.name === runningUser.value
+    && (!props.batchStatus.currentPlatform || (user.platform || '') === props.batchStatus.currentPlatform),
+  )
+
 const currentBatchUser = computed(() => {
-  const u = props.users.find(u => u.path === props.batchStatus.currentUserId)
-  return u ? (u.displayName || u.name) : ''
+  const id = props.batchStatus.currentUserId
+  const plat = props.batchStatus.currentPlatform
+  if (!id) return ''
+  const u = props.users.find((item) => item.name === id && (!plat || (item.platform || '') === plat))
+    || props.users.find((item) => item.name === id)
+  return u ? (u.displayName || u.name) : id
 })
 
 const totalBatchCount = computed(() => props.batchTotal)
@@ -238,13 +246,7 @@ const batchPercent = computed(() => {
 
 const addFormValid = computed(() => {
   if (!addForm.value.userId.trim()) return false
-  if (addForm.value.platform === 'twitter') {
-    return /(?:^|;\s*)auth_token=/.test(addForm.value.cookie)
-  }
-  if (addForm.value.platform === 'instagram') {
-    return /(?:^|;\s*)sessionid=/.test(addForm.value.cookie)
-  }
-  return addForm.value.cookie.trim().length > 8
+  return hasUsableCookie(addForm.value.platform, addForm.value.cookie)
 })
 
 const platformUserIdPlaceholder = computed(() => {

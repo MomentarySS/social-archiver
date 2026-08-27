@@ -1,5 +1,5 @@
 <template>
-  <article v-if="skin !== 'twitter'" class="wb-post">
+  <article v-if="skin !== 'twitter'" :class="skin === 'instagram' ? 'ig-post' : 'wb-post'">
     <button class="wb-avatar" type="button" tabindex="-1">
       <img v-if="avatarUrl" :src="avatarUrl" alt="" />
       <span v-else>{{ initial }}</span>
@@ -7,7 +7,11 @@
     <div class="wb-body">
       <div class="wb-name-row">
         <span class="wb-name">{{ displayName }}</span>
-        <span v-if="post.verified" class="wb-vip" title="微博认证">V</span>
+        <span v-if="post.verified && skin === 'weibo'" class="wb-vip" title="微博认证">V</span>
+        <template v-if="skin === 'instagram'">
+          <span class="ig-handle">@{{ handle }}</span>
+          <span class="ig-time">{{ weiboTime }}</span>
+        </template>
       </div>
       <div v-if="post.text" class="wb-text" v-html="weiboText"></div>
       <div v-if="expandedIndex !== null && mediaItems[expandedIndex]" class="wb-expand">
@@ -99,12 +103,20 @@
           </template>
         </div>
       </div>
-      <div class="wb-meta">
+      <div v-if="skin !== 'instagram'" class="wb-meta">
         <span>{{ weiboTime }}</span>
         <span v-if="post.source">来自 {{ post.source }}</span>
         <a
           v-if="post.url"
           class="wb-open"
+          :href="post.url"
+          @click.prevent="openLink(post.url)"
+        >查看原文</a>
+      </div>
+      <div v-else class="ig-meta">
+        <a
+          v-if="post.url"
+          class="ig-open"
           :href="post.url"
           @click.prevent="openLink(post.url)"
         >查看原文</a>
@@ -563,6 +575,7 @@ function pad(n: number) {
 
 <style scoped>
 .wb-post,
+.ig-post,
 .x-post {
   display: flex;
   gap: 10px;
@@ -573,6 +586,12 @@ function pad(n: number) {
   padding: 12px 16px;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
+}
+
+.ig-post {
+  padding: 12px 16px;
+  background: #fff;
+  border-bottom: 1px solid #efefef;
 }
 
 .wb-avatar,
@@ -590,6 +609,10 @@ function pad(n: number) {
   font-size: 20px;
 }
 
+.ig-post .wb-avatar {
+  background: #dd2a7b;
+}
+
 .wb-avatar img,
 .x-avatar img {
   width: 100%;
@@ -599,6 +622,7 @@ function pad(n: number) {
 }
 
 .wb-body,
+.ig-post .wb-body,
 .x-body {
   flex: 1;
   min-width: 0;
@@ -608,6 +632,24 @@ function pad(n: number) {
   color: #333;
   font-weight: 700;
   font-size: 15px;
+}
+
+.ig-post .wb-name {
+  color: #262626;
+}
+
+.wb-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ig-handle,
+.ig-time {
+  color: #8e8e8e;
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .wb-vip {
@@ -846,6 +888,29 @@ function pad(n: number) {
 
 .wb-open:hover {
   text-decoration: underline;
+}
+
+.ig-meta {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.ig-open {
+  color: #0095f6;
+  text-decoration: none;
+}
+
+.ig-open:hover {
+  text-decoration: underline;
+}
+
+.ig-post .wb-text {
+  color: #262626;
+}
+
+.ig-post .video-fallback button,
+.ig-post .live-open {
+  background: #0095f6;
 }
 
 .x-post {

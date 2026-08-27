@@ -31,8 +31,6 @@ export interface ElectronAPI {
   onDownloadEvent: (callback: (data: DownloadEvent) => void) => () => void
   onDownloadLog: (callback: (data: LogEvent) => void) => () => void
   onDownloadError: (callback: (data: ErrorResult) => void) => () => void
-  onDownloadDone: (callback: (data: DoneResult) => void) => () => void
-  onShortcut: (callback: (tab: string) => void) => () => void
   // Batch download
   enqueueBatchDownload: (jobs: BatchJob[]) => Promise<{ success: boolean; queued: number; error?: string }>
   stopBatchDownload: () => Promise<void>
@@ -122,7 +120,7 @@ export interface BatchStatus {
 }
 
 export interface BatchEvent {
-  type: 'user-start' | 'user-progress' | 'user-done' | 'user-error' | 'batch-done'
+  type: 'user-start' | 'user-progress' | 'user-done' | 'user-error' | 'batch-done' | 'batch-stopped' | 'done' | 'error' | 'progress' | 'status'
   userId?: string
   platform?: string
   msg?: string
@@ -135,6 +133,7 @@ export interface BatchEvent {
   posts?: number
   output_dir?: string
   userDir?: string
+  queued?: number
 }
 
 export interface UserProfile {

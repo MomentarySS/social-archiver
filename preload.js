@@ -35,16 +35,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('download:error', handler);
     return () => ipcRenderer.removeListener('download:error', handler);
   },
-  onDownloadDone: (callback) => {
-    const handler = (event, data) => callback(data);
-    ipcRenderer.on('download:done', handler);
-    return () => ipcRenderer.removeListener('download:done', handler);
-  },
-  onShortcut: (callback) => {
-    const handler = (event, data) => callback(data);
-    ipcRenderer.on('shortcut:switch-tab', handler);
-    return () => ipcRenderer.removeListener('shortcut:switch-tab', handler);
-  },
   // Batch download
   enqueueBatchDownload: (jobs) => ipcRenderer.invoke('enqueue-batch-download', jobs),
   stopBatchDownload: () => ipcRenderer.invoke('stop-batch-download'),

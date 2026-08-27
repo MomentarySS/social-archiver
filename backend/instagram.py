@@ -394,6 +394,25 @@ def _normalize_instagram_archive(output_dir: str, user_id: str) -> int:
     for post_id, post in posts.items():
         save_post_metadata(output_dir, user_id, post)
         saved += 1
+
+    if posts:
+        first = next(iter(posts.values()))
+        save_profile(output_dir, user_id, {
+            "platform": "instagram",
+            "user_id": user_id,
+            "name": first.get("user_name") or user_id,
+            "screen_name": first.get("screen_name") or user_id,
+        })
+    else:
+        save_profile(output_dir, user_id, {
+            "platform": "instagram",
+            "user_id": user_id,
+            "name": user_id,
+            "screen_name": user_id,
+        })
+    avatar = existing_avatar(user_dir)
+    if avatar:
+        save_profile(output_dir, user_id, {"avatar": os.path.basename(avatar)})
     return saved
 
 
