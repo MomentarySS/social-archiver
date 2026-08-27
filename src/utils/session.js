@@ -8,6 +8,16 @@ export function cookieForPlatform(settings, platform) {
   return cookies[platformCookieKey(platform)] || ''
 }
 
+export function userCookieKey(platform, userId) {
+  return `${platform}:${userId}`
+}
+
+export function cookieForUser(settings, platform, userId) {
+  const perUser = settings?.cookies?.per_user?.[userCookieKey(platform, userId)]
+  if (perUser) return perUser
+  return cookieForPlatform(settings, platform)
+}
+
 export function hasUsableCookie(platform, cookie) {
   const value = String(cookie || '').trim()
   if (!value) return false
@@ -27,5 +37,14 @@ export async function savePlatformCookie(platform, cookie) {
   const current = await window.electronAPI.getSettings()
   const cookies = { ...(current.cookies || {}) }
   cookies[platformCookieKey(platform)] = cookie
+  await window.electronAPI.saveSettings({ ...current, cookies })
+}
+
+export async function saveUserCookie(platform, userId, cookie) {
+  if (!window.electronAPI || !cookie) return
+  const current = await window.electronAPI.getSettings()
+  const cookies = { ...(current.cookies || {}) }
+  cookies.per_user = { ...(cookies.per_user || {}) }
+  cookies.per_user[userCookieKey(platform, userId)] = cookie
   await window.electronAPI.saveSettings({ ...current, cookies })
 }

@@ -1,124 +1,154 @@
 <template>
-  <div class="browse-view" :class="`skin-${skin}`">
-    <header class="browse-bar">
-      <div class="bar-left">
-        <label class="user-field">
-          <span>存档</span>
-          <select v-model="selectedUser" :disabled="!users.length" @change="() => loadPosts()">
-            <option value="" disabled>{{ users.length ? '选择用户' : '还没有存档' }}</option>
-            <option v-for="user in users" :key="user.path" :value="user.path">
-              {{ user.displayName || user.name }}
-            </option>
-          </select>
-        </label>
-        <button class="ghost-btn" type="button" @click="chooseOutputDir">更换目录</button>
-        <button
-          v-if="outputDir"
-          class="ghost-btn"
-          type="button"
-          :disabled="loading || updating"
-          @click="refreshBrowse"
-        >刷新</button>
-      </div>
-      <div class="bar-right">
-        <div
-          v-if="posts.length"
-          class="sort-toggle"
-          role="radiogroup"
-          aria-label="时间顺序"
-        >
+  <div class="browse-layout" :class="`skin-${skin}`">
+    <!-- Left: UserManager panel -->
+    <aside class="browse-sidebar">
+      <UserManager
+        :users="userList"
+        :selected-user="selectedUser"
+        :output-dir="outputDir"
+        :batch-status="batchStatus"
+        :batch-running="batchRunning"
+        :batch-completed="batchCompleted"
+        :batch-total="batchTotal"
+        @select-user="handleSelectUser"
+        @update-user="handleUpdateUser"
+        @delete-user="handleDeleteUser"
+        @batch-update="handleBatchUpdate"
+        @batch-delete="handleBatchDelete"
+        @add-user="handleAddUser"
+      />
+    </aside>
+
+    <!-- Right: Post timeline -->
+    <main class="browse-main">
+      <header class="browse-bar">
+        <div class="bar-left">
+          <label class="user-field">
+            <span>存档</span>
+            <select v-model="selectedUser" :disabled="!users.length" @change="() => loadPosts()">
+              <option value="" disabled>{{ users.length ? '选择用户' : '还没有存档' }}</option>
+              <option v-for="user in users" :key="user.path" :value="user.path">
+                {{ user.displayName || user.name }}
+              </option>
+            </select>
+          </label>
+          <button class="ghost-btn" type="button" @click="chooseOutputDir">更换目录</button>
           <button
+            v-if="outputDir"
+            class="ghost-btn"
             type="button"
-            role="radio"
-            :aria-checked="sortOrder === 'newest'"
-            :class="{ active: sortOrder === 'newest' }"
-            @click="setSortOrder('newest')"
-          >最新在前</button>
+            :disabled="loading || updating"
+            @click="refreshBrowse"
+          >刷新</button>
+        </div>
+        <div class="bar-right">
+          <div
+            v-if="posts.length"
+            class="sort-toggle"
+            role="radiogroup"
+            aria-label="时间顺序"
+          >
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="sortOrder === 'newest'"
+              :class="{ active: sortOrder === 'newest' }"
+              @click="setSortOrder('newest')"
+            >最新在前</button>
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="sortOrder === 'oldest'"
+              :class="{ active: sortOrder === 'oldest' }"
+              @click="setSortOrder('oldest')"
+            >最早在前</button>
+          </div>
+          <span v-if="posts.length" class="post-count">{{ posts.length }} 篇</span>
           <button
+            v-if="currentUser"
+            class="primary-btn"
             type="button"
-            role="radio"
-            :aria-checked="sortOrder === 'oldest'"
-            :class="{ active: sortOrder === 'oldest' }"
-            @click="setSortOrder('oldest')"
-          >最早在前</button>
+            :disabled="updating || exporting"
+            @click="updateArchive"
+          >
+            {{ updating ? '更新中…' : '更新' }}
+          </button>
+          <button
+            v-if="updating"
+            class="ghost-btn"
+            type="button"
+            @click="stopUpdate"
+          >停止</button>
+          <button
+            v-if="posts.length"
+            class="primary-btn"
+            type="button"
+            :disabled="exporting || updating"
+            @click="exportHtml"
+          >
+            {{ exporting ? '导出中…' : '导出离线页' }}
+          </button>
         </div>
-        <span v-if="posts.length" class="post-count">{{ posts.length }} 篇</span>
-        <button
-          v-if="currentUser"
-          class="primary-btn"
-          type="button"
-          :disabled="updating || exporting"
-          @click="updateArchive"
-        >
-          {{ updating ? '更新中…' : '更新' }}
-        </button>
-        <button
-          v-if="updating"
-          class="ghost-btn"
-          type="button"
-          @click="stopUpdate"
-        >停止</button>
-        <button
-          v-if="posts.length"
-          class="primary-btn"
-          type="button"
-          :disabled="exporting || updating"
-          @click="exportHtml"
-        >
-          {{ exporting ? '导出中…' : '导出离线页' }}
-        </button>
+      </header>
+
+      <div v-if="!outputDir" class="empty-state">
+        <p>还没有打开存档目录</p>
+        <button class="primary-btn" type="button" @click="chooseOutputDir">选择下载目录</button>
       </div>
-    </header>
 
-    <div v-if="!outputDir" class="empty-state">
-      <p>还没有打开存档目录</p>
-      <button class="primary-btn" type="button" @click="chooseOutputDir">选择下载目录</button>
-    </div>
+      <div v-else-if="loading" class="feed">
+        <div class="profile-card skeleton-profile"></div>
+        <div v-for="n in 4" :key="n" class="skeleton-post"></div>
+      </div>
 
-    <div v-else-if="loading" class="feed">
-      <div class="profile-card skeleton-profile"></div>
-      <div v-for="n in 4" :key="n" class="skeleton-post"></div>
-    </div>
-
-    <div v-else class="feed">
-      <section v-if="currentUser" class="profile-card">
-        <div class="cover"></div>
-        <div class="profile-main">
-          <div class="profile-avatar">
-            <img v-if="headerAvatar" :src="headerAvatar" alt="" />
-            <span v-else>{{ (currentUser.displayName || currentUser.name).slice(0, 1) }}</span>
+      <div v-else class="feed">
+        <section v-if="currentUser" class="profile-card">
+          <div class="cover"></div>
+          <div class="profile-main">
+            <div class="profile-avatar">
+              <img v-if="headerAvatar" :src="headerAvatar" alt="" />
+              <span v-else>{{ (currentUser.displayName || currentUser.name).slice(0, 1) }}</span>
+            </div>
+            <div class="profile-text">
+              <h2>{{ currentUser.displayName || currentUser.name }}</h2>
+              <p v-if="skin === 'weibo'">微博 / {{ currentUser.name }}</p>
+              <p v-else>@{{ currentUser.name }}</p>
+            </div>
           </div>
-          <div class="profile-text">
-            <h2>{{ currentUser.displayName || currentUser.name }}</h2>
-            <p v-if="skin === 'weibo'">微博 / {{ currentUser.name }}</p>
-            <p v-else>@{{ currentUser.name }}</p>
-          </div>
+        </section>
+        <div class="feed-gap"></div>
+
+        <div v-if="displayedPosts.length" class="timeline">
+          <PostCard
+            v-for="post in displayedPosts"
+            :key="`${sortOrder}:${post.id || post.url}`"
+            :post="post"
+          />
         </div>
-      </section>
-      <div class="feed-gap"></div>
 
-      <div v-if="displayedPosts.length" class="timeline">
-        <PostCard
-          v-for="post in displayedPosts"
-          :key="`${sortOrder}:${post.id || post.url}`"
-          :post="post"
-        />
+        <div v-else class="empty-state inner">
+          <p>{{ users.length ? '这个用户还没有可浏览的帖子' : '这个目录里还没有已缓存的用户' }}</p>
+        </div>
       </div>
-
-      <div v-else class="empty-state inner">
-        <p>{{ users.length ? '这个用户还没有可浏览的帖子' : '这个目录里还没有已缓存的用户' }}</p>
-      </div>
-    </div>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import PostCard from '../components/PostCard.vue'
+import UserManager from '../components/UserManager.vue'
 import { writeArchiveHtml } from '../utils/archiveHtml.js'
 import { sortPosts } from '../utils/postTime.js'
 import { setAppPlatform } from '../skin.js'
-import { cookieForPlatform, hasUsableCookie, savePlatformCookie } from '../utils/session.js'
+import {
+  cookieForPlatform,
+  cookieForUser,
+  hasUsableCookie,
+  savePlatformCookie,
+  saveUserCookie,
+  userCookieKey,
+} from '../utils/session.js'
 import { useToast } from '../composables/useToast'
 
 interface UserEntry {
@@ -127,6 +157,7 @@ interface UserEntry {
   platform?: string
   displayName?: string
   avatar?: string
+  lastUpdate?: string
 }
 
 interface Pic {
@@ -166,6 +197,15 @@ const sortOrder = ref<'newest' | 'oldest'>('newest')
 const cleanupFns: Array<() => void> = []
 const toast = useToast()
 
+// Batch state
+const batchRunning = ref(false)
+const batchCompleted = ref(0)
+const batchTotal = ref(0)
+const batchStatus = ref({ queued: 0, running: false })
+
+// userList = users with lastUpdate populated from _profile.json
+const userList = ref<UserEntry[]>([])
+
 const currentUser = computed(() => users.value.find(u => u.path === selectedUser.value) || null)
 const displayedPosts = computed(() => sortPosts(posts.value, sortOrder.value))
 
@@ -199,6 +239,7 @@ watch(currentUser, async (user) => {
 
 onMounted(async () => {
   setupUpdateListeners()
+  setupBatchListeners()
   try {
     if (window.electronAPI) {
       updating.value = await window.electronAPI.isDownloading()
@@ -235,7 +276,20 @@ async function scanUsers() {
   posts.value = []
   try {
     if (window.electronAPI) {
-      users.value = await window.electronAPI.scanArchives(outputDir.value)
+      const raw = await window.electronAPI.scanArchives(outputDir.value)
+      // Populate lastUpdate for each user
+      const enriched = await Promise.all(
+        raw.map(async (u: UserEntry) => {
+          try {
+            const lastUpdate = await window.electronAPI.getUserLastUpdate(u.path)
+            return { ...u, lastUpdate: lastUpdate || undefined }
+          } catch {
+            return u
+          }
+        })
+      )
+      users.value = raw
+      userList.value = enriched
       if (users.value.length) {
         selectedUser.value = users.value[0].path
         await loadPosts()
@@ -283,7 +337,8 @@ async function updateArchive() {
 
   const platform = skin.value === 'twitter' ? 'twitter' : skin.value === 'instagram' ? 'instagram' : 'weibo'
   const settings = await window.electronAPI.getSettings()
-  let cookie = cookieForPlatform(settings, platform)
+  let cookie = cookieForUser(settings, platform, user.name)
+    || cookieForPlatform(settings, platform)
 
   if (!hasUsableCookie(platform, cookie)) {
     toast.info(
@@ -304,6 +359,7 @@ async function updateArchive() {
       return
     }
     cookie = res.cookie
+    await saveUserCookie(platform, user.name, cookie)
     await savePlatformCookie(platform, cookie)
   }
 
@@ -353,12 +409,221 @@ function setupUpdateListeners() {
   }))
 }
 
+// ─── Batch handlers (called from UserManager) ───────────────────
+async function handleSelectUser(path: string) {
+  selectedUser.value = path
+  await loadPosts()
+}
+
+async function handleUpdateUser(user: UserEntry) {
+  if (await (window.electronAPI?.isDownloading() ?? Promise.resolve(false))) {
+    toast.warning('已有缓存任务进行中')
+    return
+  }
+  const platform = user.platform || skin.value === 'twitter' ? 'twitter' : skin.value === 'instagram' ? 'instagram' : 'weibo'
+  const settings = await window.electronAPI!.getSettings()
+  let cookie = cookieForUser(settings, platform, user.name)
+
+  if (!hasUsableCookie(platform, cookie)) {
+    toast.info('需要先登录' + (platform === 'twitter' ? ' X' : platform === 'instagram' ? ' Instagram' : ' 微博'))
+    return
+  }
+
+  updating.value = true
+  await window.electronAPI!.startDownload({
+    platform,
+    userId: user.name,
+    cookie,
+    outputDir: outputDir.value,
+    concurrent: settings.concurrent,
+    namingTemplate: settings.naming_template,
+  })
+}
+
+async function handleDeleteUser(user: UserEntry) {
+  if (!window.electronAPI) return
+  try {
+    const result = await window.electronAPI.deleteArchives([user.path])
+    if (result.success.length) {
+      toast.success('已删除存档')
+      await scanUsers()
+    }
+    if (result.failed.length) {
+      toast.error(`删除失败: ${result.failed.join(', ')}`)
+    }
+  } catch (e) {
+    toast.error('删除失败')
+  }
+}
+
+async function handleBatchUpdate(selected: UserEntry[]) {
+  if (!selected.length || !window.electronAPI) return
+  if (await window.electronAPI.isDownloading()) {
+    toast.warning('已有缓存任务进行中')
+    return
+  }
+
+  const settings = await window.electronAPI.getSettings()
+  const jobs = await Promise.all(
+    selected.map(async (user) => {
+      const platform = user.platform || 'twitter'
+      const cookie = cookieForUser(settings, platform, user.name)
+      if (!hasUsableCookie(platform, cookie)) {
+        return null
+      }
+      return {
+        platform,
+        userId: user.name,
+        cookie,
+        outputDir: outputDir.value,
+        concurrent: settings.concurrent,
+        namingTemplate: settings.naming_template,
+      }
+    })
+  )
+  const validJobs = jobs.filter(Boolean) as any[]
+
+  if (validJobs.length < selected.length) {
+    toast.warning(`有 ${selected.length - validJobs.length} 个用户缺少 Cookie，已跳过`)
+  }
+  if (!validJobs.length) {
+    toast.error('没有可用的 Cookie，无法开始批量缓存')
+    return
+  }
+
+  batchRunning.value = true
+  batchCompleted.value = 0
+  batchTotal.value = validJobs.length
+  batchStatus.value = { queued: validJobs.length, running: true }
+
+  try {
+    await window.electronAPI.enqueueBatchDownload(validJobs)
+  } catch (e) {
+    batchRunning.value = false
+    toast.error('批量任务启动失败')
+  }
+}
+
+async function handleBatchDelete(paths: string[]) {
+  if (!paths.length || !window.electronAPI) return
+  try {
+    const result = await window.electronAPI.deleteArchives(paths)
+    if (result.success.length) toast.success(`已删除 ${result.success.length} 个存档`)
+    if (result.failed.length) toast.error(`删除失败: ${result.failed.join(', ')}`)
+    await scanUsers()
+  } catch (e) {
+    toast.error('批量删除失败')
+  }
+}
+
+async function handleAddUser(data: { platform: string; userId: string; cookie: string }) {
+  if (!window.electronAPI) return
+  const settings = await window.electronAPI.getSettings()
+
+  // Save per-user cookie and as platform-level fallback
+  await saveUserCookie(data.platform, data.userId, data.cookie)
+  await savePlatformCookie(data.platform, data.cookie)
+
+  // Check if already exists in list
+  const existing = users.value.find(
+    (u) => u.name === data.userId && (u.platform || 'twitter') === data.platform
+  )
+  if (existing) {
+    // Just trigger update for existing user
+    toast.info('该用户已存在，开始更新…')
+    selectedUser.value = existing.path
+    await loadPosts()
+    await handleUpdateUser(existing)
+    return
+  }
+
+  // Start single download immediately
+  updating.value = true
+  batchRunning.value = false
+  try {
+    const res = await window.electronAPI.startDownload({
+      platform: data.platform,
+      userId: data.userId,
+      cookie: data.cookie,
+      outputDir: outputDir.value,
+      concurrent: settings.concurrent,
+      namingTemplate: settings.naming_template,
+    })
+    if (!res.success) {
+      updating.value = false
+      toast.error(res.error || '无法开始缓存')
+    }
+  } catch (e) {
+    updating.value = false
+    toast.error('无法开始缓存')
+  }
+}
+
+function setupBatchListeners() {
+  if (!window.electronAPI) return
+  cleanupFns.push(
+    window.electronAPI.onBatchEvent(async (event: { type?: string; userId?: string; platform?: string; userDir?: string; count?: number; msg?: string }) => {
+      // 'done' = backend succeeded; 'error' = backend failed; both mean one job finished
+      if (event.type === 'done' || event.type === 'error') {
+        batchCompleted.value++
+        if (event.userDir) await refreshCurrentArchive(event.userDir)
+      }
+    })
+  )
+  cleanupFns.push(
+    window.electronAPI.onBatchEvent(async (event: { type?: string; userId?: string; platform?: string; userDir?: string }) => {
+      // 'user-done' / 'user-error' = job completion reported by processQueue
+      if (event.type === 'user-done' || event.type === 'user-error') {
+        batchStatus.value = {
+          queued: Math.max(0, batchStatus.value.queued - 1),
+          running: true,
+          currentUserId: event.userId,
+          currentPlatform: event.platform,
+        }
+        if (event.userDir) await refreshCurrentArchive(event.userDir)
+      }
+      // 'user-start' = new job picked up; queued was decremented on user-done/user-error
+      if (event.type === 'user-start') {
+        batchStatus.value = {
+          queued: Math.max(0, batchStatus.value.queued - 1),
+          running: true,
+          currentUserId: event.userId,
+          currentPlatform: event.platform,
+        }
+      }
+    })
+  )
+  cleanupFns.push(
+    window.electronAPI.onBatchEvent((event: { type?: string }) => {
+      if (event.type === 'batch-done') {
+        batchRunning.value = false
+        batchCompleted.value = 0
+        batchTotal.value = 0
+        batchStatus.value = { queued: 0, running: false }
+        toast.success('批量缓存全部完成')
+      }
+    })
+  )
+}
+
 async function refreshCurrentArchive(userDir?: string, opts?: { silent?: boolean }) {
   if (!window.electronAPI || !outputDir.value) return
   const keep = userDir || selectedUser.value
   try {
-    users.value = await window.electronAPI.scanArchives(outputDir.value)
-    if (keep && users.value.some((user) => user.path === keep)) {
+    const raw = await window.electronAPI.scanArchives(outputDir.value)
+    const enriched = await Promise.all(
+      raw.map(async (u: UserEntry) => {
+        try {
+          const lastUpdate = await window.electronAPI.getUserLastUpdate(u.path)
+          return { ...u, lastUpdate: lastUpdate || undefined }
+        } catch {
+          return u
+        }
+      })
+    )
+    users.value = raw
+    userList.value = enriched
+    if (keep && users.value.some((u) => u.path === keep)) {
       selectedUser.value = keep
     }
     await loadPosts({ silent: opts?.silent })
@@ -392,22 +657,27 @@ async function exportHtml() {
     exporting.value = false
   }
 }
-
 </script>
 
 <style scoped>
-.browse-view {
+.browse-layout {
+  display: flex;
   min-height: calc(100vh - 58px);
 }
 
-.skin-weibo {
-  background: #f2f2f5;
-  color: #333;
+.browse-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--sa-edge);
+  overflow-y: auto;
+  max-height: calc(100vh - 58px);
+  position: sticky;
+  top: 58px;
 }
 
-.skin-twitter {
-  background: #000;
-  color: #e7e9ea;
+.browse-main {
+  flex: 1;
+  min-width: 0;
 }
 
 .browse-bar {
