@@ -8,8 +8,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "build-backend"
 
+PYTHON_MIN = (3, 9)
+
+
+def _check_python_version() -> None:
+    """Verify the host Python meets the minimum version requirement."""
+    if sys.version_info < PYTHON_MIN:
+        raise SystemExit(
+            f"Python {PYTHON_MIN[0]}.{PYTHON_MIN[1]}+ is required to build the backend, "
+            f"but found Python {sys.version_info.major}.{sys.version_info.minor}. "
+            f"Run 'py -3.9 -m pip install -r requirements.txt' or use a newer Python."
+        )
+
 
 def main() -> None:
+    _check_python_version()
     cmd = [
         sys.executable,
         "-m",
