@@ -28,9 +28,11 @@ function formatDateForHtml(raw) {
 function detectSkin(posts, platform) {
   const value = String(platform || posts[0]?.platform || '').toLowerCase()
   if (value === 'twitter' || value === 'x') return 'twitter'
+  if (value === 'instagram') return 'instagram'
   if (value === 'weibo') return 'weibo'
   const url = posts[0]?.url || ''
   if (/x\.com|twitter\.com/i.test(url)) return 'twitter'
+  if (/instagram\.com/i.test(url)) return 'instagram'
   return 'weibo'
 }
 
@@ -85,6 +87,8 @@ export function buildArchiveHtml({ posts, userName, handle, platform }) {
 
   return isX
     ? twitterArchiveHtml(name, account, body, ordered.length)
+    : detectSkin(ordered, platform) === 'instagram'
+    ? igArchiveHtml(name, account, body, ordered.length)
     : weiboArchiveHtml(name, body, ordered.length)
 }
 
@@ -193,6 +197,56 @@ function twitterArchiveHtml(userName, handle, body, count) {
     <div class="sub">${count} posts · local archive</div>
     ${sortControlsHtml()}
   </div>
+  <div id="feed">${body}</div>
+</div>
+${archiveLightbox()}
+</body>
+</html>`
+}
+
+function igArchiveHtml(userName, handle, body, count) {
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtml(userName)} (@${escapeHtml(handle)})</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; background: #fafafa; color: #262626; }
+  .page { max-width: 600px; margin: 0 auto; background: #fff; min-height: 100vh; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .cover { height: 120px; background: linear-gradient(45deg, #f58529 0%, #dd2a7b 50%, #515bd4 100%); }
+  .profile { padding: 0 16px 16px; }
+  .band { height: 8px; background: #fafafa; }
+  .avatar { width: 72px; height: 72px; border-radius: 50%; background: #dd2a7b; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; margin-top: -28px; border: 3px solid #fff; }
+  h1 { font-size: 20px; font-weight: 800; margin-top: 10px; letter-spacing: -0.02em; }
+  .sub { color: #8e8e8e; font-size: 13px; margin-top: 4px; }
+  .post { padding: 12px 16px; border-bottom: 1px solid #efefef; }
+  .name { font-weight: 700; font-size: 15px; }
+  .text { font-size: 15px; line-height: 1.6; margin: 6px 0 8px; }
+  .images { display: grid; gap: 4px; max-width: 360px; }
+  .images.n1 { grid-template-columns: 1fr; max-width: 260px; }
+  .images.n2, .images.n4 { grid-template-columns: 1fr 1fr; }
+  .images.n3, .images.n5, .images.n6, .images.n7, .images.n8, .images.n9 { grid-template-columns: 1fr 1fr 1fr; }
+  .cell { aspect-ratio: 1; background: #efefef; overflow: hidden; position: relative; }
+  img, video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .meta { font-size: 12px; color: #8e8e8e; }
+  a { color: #0095f6; text-decoration: none; }
+  .sort { display: flex; gap: 8px; margin-top: 12px; }
+  .sort button { height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid #dbdbdb; background: #fff; color: #8e8e8e; font: inherit; font-size: 13px; cursor: pointer; }
+  .sort button.on { background: #0095f6; border-color: #0095f6; color: #fff; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="cover"></div>
+  <div class="profile">
+    <div class="avatar">${escapeHtml(userName.slice(0, 1))}</div>
+    <h1>${escapeHtml(userName)}</h1>
+    <div class="sub">@${escapeHtml(handle)} · 共 ${count} 条 Instagram · 本地存档</div>
+    ${sortControlsHtml()}
+  </div>
+  <div class="band"></div>
   <div id="feed">${body}</div>
 </div>
 ${archiveLightbox()}
