@@ -29,9 +29,9 @@ export interface ElectronAPI {
   twitterLogin: () => Promise<{ success: boolean; cookie?: string; error?: string }>
   instagramLogin: () => Promise<{ success: boolean; cookie?: string; error?: string }>
   onDownloadEvent: (callback: (data: DownloadEvent) => void) => () => void
-  onDownloadLog: (callback: (data: DownloadEvent) => void) => () => void
-  onDownloadError: (callback: (data: DownloadEvent) => void) => () => void
-  onDownloadDone: (callback: (data: DownloadEvent) => void) => () => void
+  onDownloadLog: (callback: (data: LogEvent) => void) => () => void
+  onDownloadError: (callback: (data: ErrorResult) => void) => () => void
+  onDownloadDone: (callback: (data: DoneResult) => void) => () => void
   onShortcut: (callback: (tab: string) => void) => () => void
 }
 
@@ -94,6 +94,18 @@ export interface DownloadEvent {
   posts?: number
   output_dir?: string
   userDir?: string
+}
+
+// Discriminated union for the download:event IPC channel
+export type ProgressEvent = { type: 'progress'; file: string; percent: number; current: number; total: number }
+export type DoneResult    = { type: 'done';    count: number; skipped: number; posts: number; output_dir?: string; userDir?: string }
+export type ErrorResult   = { type: 'error';  msg: string }
+export type StatusEvent  = { type: 'status'; msg: string }
+export type UnknownEvent  = { type?: string; [key: string]: unknown }
+export type DownloadEvent = ProgressEvent | DoneResult | ErrorResult | StatusEvent | UnknownEvent
+
+export interface LogEvent {
+  msg?: string
 }
 
 declare global {

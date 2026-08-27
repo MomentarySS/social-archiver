@@ -79,6 +79,7 @@ import { writeArchiveHtml } from '../utils/archiveHtml.js'
 import { appPlatform, setAppPlatform } from '../skin.js'
 import { cookieForPlatform, savePlatformCookie } from '../utils/session.js'
 import { useToast } from '../composables/useToast'
+import type { DownloadEvent, DoneResult, ErrorResult, LogEvent } from '../electron-api.d.ts'
 
 interface Progress {
   percent?: number
@@ -98,20 +99,6 @@ interface LogEntry {
   time: string
   msg: string
   type: 'info' | 'error' | 'success'
-}
-
-interface DownloadEvent {
-  type?: string
-  msg?: string
-  file?: string
-  percent?: number
-  current?: number
-  total?: number
-  count?: number
-  skipped?: number
-  posts?: number
-  output_dir?: string
-  userDir?: string
 }
 
 const platform = appPlatform
@@ -278,16 +265,15 @@ async function refreshOfflinePage(userDir?: string) {
 }
 
 async function handleDownloadEvent(event: DownloadEvent) {
-  const type = event.type
-  
-  if (type === 'progress') {
+  // Discriminated union: narrowing via event.type directly
+  if (event.type === 'progress') {
     progress.value = {
       file: event.file,
       percent: event.percent,
       current: event.current,
       total: event.total,
     }
-  } else if (type === 'done') {
+  } else if (event.type === 'done') {
     result.value = {
       count: event.count,
       skipped: event.skipped,
@@ -299,12 +285,12 @@ async function handleDownloadEvent(event: DownloadEvent) {
       addLog(`保存位置：${event.output_dir}`, 'success')
     }
     await refreshOfflinePage(event.userDir)
-  } else if (type === 'error') {
+  } else if (event.type === 'error') {
     result.value = { error: event.msg }
     isDownloading.value = false
     addLog(`错误：${event.msg}`, 'error')
     toast.error(event.msg || '下载失败')
-  } else if (type === 'status') {
+  } else if (event.type === 'status') {
     if (event.msg) {
       addLog(event.msg, 'info')
       // 解析微博中间状态「已缓存 N 条原创」提取帖子计数
@@ -318,18 +304,18 @@ function setupEventListeners() {
   if (!window.electronAPI) return
 
   cleanupFns.push(window.electronAPI.onDownloadEvent(handleDownloadEvent))
-  cleanupFns.push(window.electronAPI.onDownloadLog((data: DownloadEvent) => {
+  cleanupFns.push(window.electronAPI.onDownloadLog((data: LogEvent) => {
     if (data.msg) {
       addLog(data.msg, 'info')
     }
   }))
-  cleanupFns.push(window.electronAPI.onDownloadError((data: DownloadEvent) => {
+  cleanupFns.push(window.electronAPI.onDownloadError((data: ErrorResult) => {
     result.value = { error: data.msg }
     isDownloading.value = false
     addLog(`错误：${data.msg}`, 'error')
     toast.error(data.msg || '下载失败')
   }))
-  cleanupFns.push(window.electronAPI.onDownloadDone(async (data: DownloadEvent) => {
+  cleanupFns.push(window.electronAPI.onDownloadDone(async (data: DoneResult) => {
     result.value = {
       count: data.count,
       skipped: data.skipped,
