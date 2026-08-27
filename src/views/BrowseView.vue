@@ -443,7 +443,7 @@ async function handleUpdateUser(user: UserEntry) {
 async function handleDeleteUser(user: UserEntry) {
   if (!window.electronAPI) return
   try {
-    const result = await window.electronAPI.deleteArchives([user.path])
+    const result = await window.electronAPI.deleteArchives([user.path], outputDir.value)
     if (result.success.length) {
       toast.success('已删除存档')
       await scanUsers()
@@ -507,7 +507,7 @@ async function handleBatchUpdate(selected: UserEntry[]) {
 async function handleBatchDelete(paths: string[]) {
   if (!paths.length || !window.electronAPI) return
   try {
-    const result = await window.electronAPI.deleteArchives(paths)
+    const result = await window.electronAPI.deleteArchives(paths, outputDir.value)
     if (result.success.length) toast.success(`已删除 ${result.success.length} 个存档`)
     if (result.failed.length) toast.error(`删除失败: ${result.failed.join(', ')}`)
     await scanUsers()

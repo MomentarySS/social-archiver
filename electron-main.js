@@ -61,6 +61,7 @@ let downloadProcess = null;
 // Batch download queue state
 let downloadQueue = [];          // Array of BatchJob objects
 let currentBatchJob = null;      // { platform, userId, cookie, outputDir, concurrent, namingTemplate }
+let batchProcess = null;         // active subprocess for the current batch job
 let isBatchRunning = false;
 
 function mimeForAsset(filePath) {
@@ -306,6 +307,7 @@ function processQueue() {
     platform: job.platform,
   });
 
+  batchProcess = null;
   let proc;
   try {
     proc = spawn(backendInfo.program, args, {
@@ -313,6 +315,7 @@ function processQueue() {
       windowsHide: true,
       env: backendInfo.env,
     });
+    batchProcess = proc;
   } catch (err) {
     mainWindow?.webContents.send('batch:event', {
       type: 'user-error',
@@ -321,6 +324,7 @@ function processQueue() {
       msg: err.message,
     });
     currentBatchJob = null;
+    batchProcess = null;
     processQueue();
     return;
   }
@@ -360,7 +364,7 @@ function processQueue() {
   });
 
   proc.on('close', (code) => {
-    const userDir = job.userDir;
+    const userDir = path.join(job.outputDir, job.platform, job.userId);
     if (code !== 0) {
       mainWindow?.webContents.send('batch:event', {
         type: 'user-error',
@@ -378,6 +382,7 @@ function processQueue() {
       });
     }
     currentBatchJob = null;
+    batchProcess = null;
     processQueue();
   });
 }
@@ -408,10 +413,13 @@ ipcMain.handle('enqueue-batch-download', async (event, jobs) => {
 });
 
 ipcMain.handle('stop-batch-download', async () => {
-  if (currentBatchJob) {
-    // Can't easily kill the current job without breaking state, so just clear queue
+  if (batchProcess) {
+    batchProcess.kill();
+    batchProcess = null;
   }
   downloadQueue = [];
+  isBatchRunning = false;
+  currentBatchJob = null;
   return {};
 });
 
@@ -461,12 +469,12 @@ ipcMain.handle('start-download', async (event, { platform, userId, cookie, outpu
       for (const line of lines) {
         try {
           const event = JSON.parse(line);
-              if (event.type === 'done') {
+          if (event.type === 'done') {
             event.userDir = path.join(outputDir, platform, userId);
           }
-          mainWindow.webContents.send('download:event', event);
+          mainWindow?.webContents.send('download:event', event);
         } catch (e) {
-          mainWindow.webContents.send('download:log', { msg: line });
+          mainWindow?.webContents.send('download:log', { msg: line });
         }
       }
     });
@@ -474,14 +482,14 @@ ipcMain.handle('start-download', async (event, { platform, userId, cookie, outpu
     downloadProcess.stderr.on('data', (data) => {
       const msg = data.toString('utf8').trim();
       if (msg) {
-        mainWindow.webContents.send('download:log', { msg });
+        mainWindow?.webContents.send('download:log', { msg });
       }
     });
 
     downloadProcess.on('close', (code) => {
       downloadProcess = null;
       if (code !== 0) {
-        mainWindow.webContents.send('download:error', { msg: `缓存进程异常退出（代码 ${code}）` });
+        mainWindow?.webContents.send('download:error', { msg: `缓存进程异常退出（代码 ${code}）` });
       }
     });
 
@@ -505,10 +513,15 @@ ipcMain.handle('is-downloading', async () => {
   return downloadProcess !== null || isBatchRunning;
 });
 
-ipcMain.handle('delete-archives', async (event, userPaths) => {
+ipcMain.handle('delete-archives', async (event, { paths, rootDir }) => {
   const results = { success: [], failed: [] };
-  for (const userPath of userPaths) {
+  for (const userPath of paths) {
     try {
+      // Defensive: require paths to be inside rootDir if provided
+      if (rootDir && !userPath.startsWith(path.resolve(rootDir) + path.sep)) {
+        results.failed.push(userPath);
+        continue;
+      }
       if (!fs.existsSync(userPath)) {
         results.failed.push(userPath);
         continue;
@@ -1011,8 +1024,12 @@ function resolveBackendPath() {
     if (fs.existsSync(exePath)) {
       return { program: exePath, args: [], cwd: backendDir, env };
     }
+    // Packaged but backend exe missing — fail clearly instead of silently
+    // falling through to an invalid __dirname path inside the ASAR.
+    throw new Error(`后端程序未找到: ${exePath}。请重新构建打包。`);
   }
 
+  // Development: use python with backend/cli.py alongside electron-main.js
   const cliPath = path.join(__dirname, 'backend', 'cli.py');
   return { program: 'python', args: [cliPath], cwd: __dirname, env };
 }

@@ -39,7 +39,7 @@ export interface ElectronAPI {
   getBatchStatus: () => Promise<BatchStatus>
   onBatchEvent: (callback: (data: BatchEvent) => void) => () => void
   // Archive management
-  deleteArchives: (userPaths: string[]) => Promise<{ success: string[]; failed: string[] }>
+  deleteArchives: (paths: string[], rootDir?: string) => Promise<{ success: string[]; failed: string[] }>
   getUserLastUpdate: (userDir: string) => Promise<string | null>
 }
 

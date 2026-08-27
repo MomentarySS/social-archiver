@@ -59,6 +59,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     };
   },
   // Archive management
-  deleteArchives: (userPaths) => ipcRenderer.invoke('delete-archives', userPaths),
+  deleteArchives: (paths, rootDir) => ipcRenderer.invoke('delete-archives', { paths, rootDir }),
   getUserLastUpdate: (userDir) => ipcRenderer.invoke('get-user-last-update', userDir),
 });
