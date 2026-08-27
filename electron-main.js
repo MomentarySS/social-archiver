@@ -73,11 +73,23 @@ function mimeForAsset(filePath) {
 function localPathFromAssetUrl(requestUrl) {
   const parsed = new URL(requestUrl);
   const fromQuery = parsed.searchParams.get('path');
-  if (fromQuery) return fromQuery;
+  if (fromQuery) {
+    // searchParams.get() auto-decodes percent-encoding, so fromQuery
+    // is the plain file system path (backslashes on Windows)
+    return fromQuery;
+  }
   let raw = decodeURIComponent((parsed.pathname || '').replace(/^\/+/, ''));
   if (raw.toLowerCase().startsWith('local/')) raw = raw.slice(6);
-  if (raw.startsWith('/') && /^[A-Za-z]:/.test(raw.slice(1))) raw = raw.slice(1);
-  return raw;
+  // Handle Windows absolute paths: /C:/foo → C:\foo
+  if (/^\/[A-Za-z]:/.test(raw)) raw = raw.slice(1);
+  // Normalize separators and .. components, keeping drive letter intact
+  if (/^[A-Za-z]:/.test(raw)) {
+    // Windows absolute path: normalize separators, not the drive prefix
+    const drive = raw.slice(0, 2);
+    const rest = path.normalize(raw.slice(2).replace(/\//g, '\\'));
+    return drive + rest;
+  }
+  return path.normalize(raw);
 }
 
 function byteRange(size, header) {
