@@ -33,6 +33,14 @@ export interface ElectronAPI {
   onDownloadError: (callback: (data: ErrorResult) => void) => () => void
   onDownloadDone: (callback: (data: DoneResult) => void) => () => void
   onShortcut: (callback: (tab: string) => void) => () => void
+  // Batch download
+  enqueueBatchDownload: (jobs: BatchJob[]) => Promise<{ success: boolean; queued: number; error?: string }>
+  stopBatchDownload: () => Promise<void>
+  getBatchStatus: () => Promise<BatchStatus>
+  onBatchEvent: (callback: (data: BatchEvent) => void) => () => void
+  // Archive management
+  deleteArchives: (userPaths: string[]) => Promise<{ success: string[]; failed: string[] }>
+  getUserLastUpdate: (userDir: string) => Promise<string | null>
 }
 
 export interface Settings {
@@ -40,7 +48,9 @@ export interface Settings {
   concurrent?: number
   naming_template?: string
   last_platform?: string
-  cookies?: Record<string, string>
+  cookies?: Record<string, string> & {
+    per_user?: Record<string, string>
+  }
 }
 
 export interface Pic {
@@ -80,6 +90,7 @@ export interface UserEntry {
   platform?: string
   displayName?: string
   avatar?: string
+  lastUpdate?: string
 }
 
 export interface DownloadEvent {
@@ -106,6 +117,48 @@ export type DownloadEvent = ProgressEvent | DoneResult | ErrorResult | StatusEve
 
 export interface LogEvent {
   msg?: string
+}
+
+// Batch download types
+export interface BatchJob {
+  platform: string
+  userId: string
+  cookie: string
+  outputDir: string
+  concurrent: number
+  namingTemplate: string
+}
+
+export interface BatchStatus {
+  queued: number
+  running: boolean
+  currentUserId?: string
+  currentPlatform?: string
+}
+
+export interface BatchEvent {
+  type: 'user-start' | 'user-progress' | 'user-done' | 'user-error' | 'batch-done'
+  userId?: string
+  platform?: string
+  msg?: string
+  file?: string
+  percent?: number
+  current?: number
+  total?: number
+  count?: number
+  skipped?: number
+  posts?: number
+  output_dir?: string
+  userDir?: string
+}
+
+export interface UserProfile {
+  name?: string
+  screen_name?: string
+  platform?: string
+  displayName?: string
+  avatar?: string
+  lastUpdate?: string
 }
 
 declare global {

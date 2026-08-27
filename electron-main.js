@@ -54,7 +54,14 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 let mainWindow;
+
+// Single download state (for per-user start)
 let downloadProcess = null;
+
+// Batch download queue state
+let downloadQueue = [];          // Array of BatchJob objects
+let currentBatchJob = null;      // { platform, userId, cookie, outputDir, concurrent, namingTemplate }
+let isBatchRunning = false;
 
 function mimeForAsset(filePath) {
   const ext = path.extname(filePath || '').toLowerCase();
@@ -261,6 +268,164 @@ function readSettings() {
   return {};
 }
 
+// ─── Batch Download Queue ───────────────────────────────────────────
+
+function buildDownloadArgs(job) {
+  const settings = readSettings();
+  const backendInfo = resolveBackendPath();
+  const args = [
+    ...backendInfo.args,
+    '--platform', job.platform,
+    '--user-id', job.userId,
+    '--cookie', job.cookie || '',
+    '--output-dir', job.outputDir,
+    '--concurrent', String(job.concurrent || settings.concurrent || 3),
+    '--naming-template', job.namingTemplate || settings.naming_template || '{post_id}_{index}',
+  ];
+  return { backendInfo, args };
+}
+
+function processQueue() {
+  if (downloadQueue.length === 0) {
+    isBatchRunning = false;
+    currentBatchJob = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('batch:done', {});
+    }
+    return;
+  }
+
+  isBatchRunning = true;
+  const job = downloadQueue.shift();
+  currentBatchJob = job;
+  const { backendInfo, args } = buildDownloadArgs(job);
+
+  mainWindow?.webContents.send('batch:event', {
+    type: 'user-start',
+    userId: job.userId,
+    platform: job.platform,
+  });
+
+  let proc;
+  try {
+    proc = spawn(backendInfo.program, args, {
+      cwd: backendInfo.cwd,
+      windowsHide: true,
+      env: backendInfo.env,
+    });
+  } catch (err) {
+    mainWindow?.webContents.send('batch:event', {
+      type: 'user-error',
+      userId: job.userId,
+      platform: job.platform,
+      msg: err.message,
+    });
+    currentBatchJob = null;
+    processQueue();
+    return;
+  }
+
+  proc.stdout.on('data', (data) => {
+    const lines = data.toString('utf8').split('\n').filter(l => l.trim());
+    for (const raw of lines) {
+      try {
+        const evt = JSON.parse(raw);
+        if (evt.type === 'done') {
+          evt.userDir = path.join(job.outputDir, job.platform, job.userId);
+          // Update lastUpdate in _profile.json
+          updateProfileLastUpdate(evt.userDir);
+        }
+        mainWindow?.webContents.send('batch:event', { ...evt, userId: job.userId, platform: job.platform });
+      } catch (_) {
+        mainWindow?.webContents.send('batch:event', {
+          type: 'user-progress',
+          userId: job.userId,
+          platform: job.platform,
+          msg: raw,
+        });
+      }
+    }
+  });
+
+  proc.stderr.on('data', (data) => {
+    const msg = data.toString('utf8').trim();
+    if (msg) {
+      mainWindow?.webContents.send('batch:event', {
+        type: 'user-progress',
+        userId: job.userId,
+        platform: job.platform,
+        msg,
+      });
+    }
+  });
+
+  proc.on('close', (code) => {
+    const userDir = job.userDir;
+    if (code !== 0) {
+      mainWindow?.webContents.send('batch:event', {
+        type: 'user-error',
+        userId: job.userId,
+        platform: job.platform,
+        userDir,
+        msg: `进程退出（代码 ${code}）`,
+      });
+    } else {
+      mainWindow?.webContents.send('batch:event', {
+        type: 'user-done',
+        userId: job.userId,
+        platform: job.platform,
+        userDir,
+      });
+    }
+    currentBatchJob = null;
+    processQueue();
+  });
+}
+
+function updateProfileLastUpdate(userDir) {
+  try {
+    const profilePath = path.join(userDir, '_profile.json');
+    let profile = {};
+    if (fs.existsSync(profilePath)) {
+      try { profile = JSON.parse(fs.readFileSync(profilePath, 'utf8')); } catch (_) {}
+    }
+    profile.lastUpdate = new Date().toISOString();
+    fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2), 'utf8');
+  } catch (_) {}
+}
+
+ipcMain.handle('enqueue-batch-download', async (event, jobs) => {
+  if (!Array.isArray(jobs) || jobs.length === 0) {
+    return { success: false, error: '没有要下载的用户', queued: 0 };
+  }
+  for (const job of jobs) {
+    downloadQueue.push(job);
+  }
+  if (!isBatchRunning) {
+    processQueue();
+  }
+  return { success: true, queued: downloadQueue.length };
+});
+
+ipcMain.handle('stop-batch-download', async () => {
+  if (currentBatchJob) {
+    // Can't easily kill the current job without breaking state, so just clear queue
+  }
+  downloadQueue = [];
+  return {};
+});
+
+ipcMain.handle('get-batch-status', async () => {
+  return {
+    queued: downloadQueue.length,
+    running: isBatchRunning,
+    currentUserId: currentBatchJob?.userId,
+    currentPlatform: currentBatchJob?.platform,
+  };
+});
+
+// ─── Single-user download (existing) ───────────────────────────────
+
 ipcMain.handle('start-download', async (event, { platform, userId, cookie, outputDir, startDate, endDate, concurrent, namingTemplate }) => {
   if (downloadProcess) {
     return { success: false, error: '已有缓存任务进行中' };
@@ -337,7 +502,35 @@ ipcMain.handle('stop-download', async () => {
 });
 
 ipcMain.handle('is-downloading', async () => {
-  return downloadProcess !== null;
+  return downloadProcess !== null || isBatchRunning;
+});
+
+ipcMain.handle('delete-archives', async (event, userPaths) => {
+  const results = { success: [], failed: [] };
+  for (const userPath of userPaths) {
+    try {
+      if (!fs.existsSync(userPath)) {
+        results.failed.push(userPath);
+        continue;
+      }
+      fs.rmSync(userPath, { recursive: true, force: true });
+      results.success.push(userPath);
+    } catch (e) {
+      results.failed.push(userPath);
+    }
+  }
+  return results;
+});
+
+ipcMain.handle('get-user-last-update', async (event, userDir) => {
+  try {
+    const profilePath = path.join(userDir, '_profile.json');
+    if (!fs.existsSync(profilePath)) return null;
+    const profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    return profile.lastUpdate || null;
+  } catch (_) {
+    return null;
+  }
 });
 
 ipcMain.handle('select-output-dir', async () => {

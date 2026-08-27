@@ -45,4 +45,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('shortcut:switch-tab', handler);
     return () => ipcRenderer.removeListener('shortcut:switch-tab', handler);
   },
+  // Batch download
+  enqueueBatchDownload: (jobs) => ipcRenderer.invoke('enqueue-batch-download', jobs),
+  stopBatchDownload: () => ipcRenderer.invoke('stop-batch-download'),
+  getBatchStatus: () => ipcRenderer.invoke('get-batch-status'),
+  onBatchEvent: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('batch:event', handler);
+    ipcRenderer.on('batch:done', handler);
+    return () => {
+      ipcRenderer.removeListener('batch:event', handler);
+      ipcRenderer.removeListener('batch:done', handler);
+    };
+  },
+  // Archive management
+  deleteArchives: (userPaths) => ipcRenderer.invoke('delete-archives', userPaths),
+  getUserLastUpdate: (userDir) => ipcRenderer.invoke('get-user-last-update', userDir),
 });
