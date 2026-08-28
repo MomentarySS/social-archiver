@@ -1,5 +1,5 @@
 <template>
-  <div class="user-manager" :class="`skin-${skin}`">
+  <div class="user-manager">
     <!-- Header -->
     <div class="um-header">
       <span class="um-title">用户管理</span>
@@ -224,13 +224,6 @@ const addForm = ref({ platform: 'twitter', userId: '', cookie: '', startDate: ''
 const deleteTarget = ref<UserEntry | null>(null)
 
 // ─── Computed ───────────────────────────────────────────────────
-const skin = computed(() => {
-  const p = props.users.find(u => u.path === props.selectedUser)?.platform || ''
-  if (p === 'twitter' || p === 'x') return 'twitter'
-  if (p === 'instagram') return 'instagram'
-  return 'weibo'
-})
-
 const allChecked = computed(() =>
   props.users.length > 0 && props.users.every(u => checkedUsers.value.has(u.path))
 )

@@ -8,6 +8,13 @@
       <nav class="app-nav" aria-label="主导航">
         <button
           type="button"
+          class="theme-btn"
+          :aria-pressed="browseTheme === 'dark'"
+          :title="browseTheme === 'dark' ? '切换浅色' : '切换深色'"
+          @click="toggleBrowseTheme"
+        >{{ browseTheme === 'dark' ? '浅色' : '深色' }}</button>
+        <button
+          type="button"
           :class="{ active: activeTab === 'download' }"
           @click="activeTab = 'download'"
         >缓存</button>
@@ -41,6 +48,7 @@ import BrowseView from './views/BrowseView.vue'
 import SettingsView from './views/SettingsView.vue'
 import SaToast from './components/SaToast.vue'
 import { toastItems } from './composables/useToast'
+import { browseTheme, toggleBrowseTheme } from './theme.js'
 
 const activeTab = ref<'download' | 'browse' | 'settings'>('download')
 
@@ -104,6 +112,22 @@ onUnmounted(() => {
 .app-nav {
   display: flex;
   gap: 4px;
+  align-items: center;
+}
+
+.theme-btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--sa-edge);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--sa-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.theme-btn:hover {
+  color: var(--sa-ink);
 }
 
 .app-nav button {

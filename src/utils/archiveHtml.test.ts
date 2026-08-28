@@ -1,46 +1,46 @@
 import { describe, expect, it } from 'vitest'
-import { buildArchiveHtml, detectSkin } from './archiveHtml.js'
+import { buildArchiveHtml } from './archiveHtml.js'
+import { detectPostPlatform } from './postPlatform.js'
 
-describe('detectSkin', () => {
+describe('detectPostPlatform', () => {
   it('returns twitter for platform twitter', () => {
-    expect(detectSkin([], 'twitter')).toBe('twitter')
+    expect(detectPostPlatform({}, { platform: 'twitter' })).toBe('twitter')
   })
 
   it('returns twitter for platform x', () => {
-    expect(detectSkin([], 'x')).toBe('twitter')
+    expect(detectPostPlatform({}, { platform: 'x' })).toBe('twitter')
   })
 
   it('returns instagram for platform instagram', () => {
-    expect(detectSkin([], 'instagram')).toBe('instagram')
+    expect(detectPostPlatform({}, { platform: 'instagram' })).toBe('instagram')
   })
 
   it('returns weibo for platform weibo', () => {
-    expect(detectSkin([], 'weibo')).toBe('weibo')
+    expect(detectPostPlatform({}, { platform: 'weibo' })).toBe('weibo')
   })
 
   it('returns twitter for x.com URL in first post', () => {
-    expect(detectSkin([{ id: '1', url: 'https://x.com/user/status/123' }], '')).toBe('twitter')
-  })
-
-  it('returns twitter for twitter.com URL in first post', () => {
-    expect(detectSkin([{ id: '1', url: 'https://twitter.com/user/status/123' }], '')).toBe('twitter')
+    expect(detectPostPlatform({ url: 'https://x.com/user/status/123' })).toBe('twitter')
   })
 
   it('returns instagram for instagram.com URL in first post', () => {
-    expect(detectSkin([{ id: '1', url: 'https://instagram.com/p/abc' }], '')).toBe('instagram')
+    expect(detectPostPlatform({ url: 'https://instagram.com/p/abc' })).toBe('instagram')
   })
 
   it('returns weibo as default fallback', () => {
-    expect(detectSkin([{ id: '1', url: '' }], '')).toBe('weibo')
+    expect(detectPostPlatform({ url: '' })).toBe('weibo')
   })
 
   it('prefers explicit platform over URL detection', () => {
-    expect(detectSkin([{ id: '1', url: 'https://x.com/user/status/123' }], 'instagram')).toBe('instagram')
+    expect(detectPostPlatform(
+      { url: 'https://x.com/user/status/123', platform: 'instagram' },
+      { platform: 'instagram' },
+    )).toBe('instagram')
   })
 })
 
 describe('buildArchiveHtml', () => {
-  it('renders instagram posts with handle and IG skin', () => {
+  it('renders instagram posts with handle and unified theme tokens', () => {
     const html = buildArchiveHtml({
       posts: [{
         id: '1',
@@ -53,13 +53,25 @@ describe('buildArchiveHtml', () => {
       userName: 'Ada',
       handle: 'ada',
       platform: 'instagram',
+      theme: 'light',
     })
     expect(html).toContain('@ada')
     expect(html).toContain('查看原文')
-    expect(html).toContain('#fafafa')
-    expect(html).toContain('#0095f6')
-    expect(html).toContain('class="at"')
-    expect(html).toContain('class="topic"')
+    expect(html).toContain('--accent: #2563eb')
+    expect(html).toContain('class="entity"')
+    expect(html).toContain('id="sa-theme-toggle"')
     expect(html).not.toContain('来自')
+  })
+
+  it('embeds dark theme when requested', () => {
+    const html = buildArchiveHtml({
+      posts: [{ id: '1', platform: 'weibo', text: 'hi' }],
+      userName: 'Test',
+      handle: 'test',
+      platform: 'weibo',
+      theme: 'dark',
+    })
+    expect(html).toContain('data-theme="dark"')
+    expect(html).toContain('--bg: #09090b')
   })
 })
