@@ -1,5 +1,5 @@
 <template>
-  <div class="browse-layout" :class="`skin-${skin}`">
+  <div class="browse-layout">
     <!-- Left: UserManager panel -->
     <aside class="browse-sidebar">
       <UserManager
@@ -112,8 +112,7 @@
             </div>
             <div class="profile-text">
               <h2>{{ currentUser.displayName || currentUser.name }}</h2>
-              <p v-if="skin === 'weibo'">微博 / {{ currentUser.name }}</p>
-              <p v-else>@{{ currentUser.name }}</p>
+              <p>{{ platformLabel }} / {{ currentUser.name }}</p>
             </div>
           </div>
         </section>
@@ -142,8 +141,8 @@ import UserManager from '../components/UserManager.vue'
 import { writeArchiveHtml } from '../utils/archiveHtml.js'
 import { sortPosts } from '../utils/postTime.js'
 import { localAssetUrl } from '../utils/assetUrl.js'
-import { setAppPlatform } from '../skin.js'
-import { normalizePlatform } from '../constants'
+import { PLATFORM_LABELS, normalizePlatform, type Platform } from '../constants'
+import { detectPostPlatform } from '../utils/postPlatform.js'
 import {
   cookieForPlatform,
   cookieForUser,
@@ -182,20 +181,9 @@ function setSortOrder(order: 'newest' | 'oldest') {
   sortOrder.value = order
 }
 
-const skin = computed(() => {
-  const platform = (currentUser.value?.platform || posts.value[0]?.platform || '').toLowerCase()
-  if (platform === 'twitter' || platform === 'x') return 'twitter'
-  if (platform === 'instagram') return 'instagram'
-  if (platform === 'weibo') return 'weibo'
-  const url = posts.value[0]?.url || ''
-  if (/x\.com|twitter\.com/i.test(url)) return 'twitter'
-  if (/instagram\.com/i.test(url)) return 'instagram'
-  return 'weibo'
-})
+const currentPlatform = computed(() => detectPostPlatform(posts.value[0], currentUser.value))
 
-watch(skin, (value) => {
-  setAppPlatform(value)
-}, { immediate: true })
+const platformLabel = computed(() => PLATFORM_LABELS[currentPlatform.value as Platform] || '存档')
 
 watch(currentUser, (user) => {
   headerAvatar.value = user?.avatar ? localAssetUrl(user.avatar) : ''
@@ -316,14 +304,14 @@ async function startUserDownload(user: UserEntry, dates?: { startDate?: string; 
     toast.warning('已有缓存任务进行中')
     return
   }
-  const platform = normalizePlatform(user.platform, skin.value)
-  const cookie = await ensureCookie(platform, user.name)
+  const userPlatform = normalizePlatform(user.platform, currentPlatform.value)
+  const cookie = await ensureCookie(userPlatform, user.name)
   if (!cookie) return
   const settings = await window.electronAPI.getSettings()
   updating.value = true
   try {
     const res = await window.electronAPI.startDownload({
-      platform,
+      platform: userPlatform,
       userId: user.name,
       cookie,
       outputDir: outputDir.value,
@@ -582,7 +570,7 @@ async function exportHtml() {
       posts: posts.value,
       userName: user?.displayName || user?.name || 'user',
       handle: user?.name || '',
-      platform: skin.value,
+      platform: currentPlatform.value,
     })
     if (res.success) {
       toast.success('离线页面已生成，正在打开文件夹...')
@@ -602,6 +590,8 @@ async function exportHtml() {
 .browse-layout {
   display: flex;
   min-height: calc(100vh - 58px);
+  background: var(--sa-bg);
+  color: var(--sa-ink);
 }
 
 .browse-sidebar {
@@ -630,16 +620,8 @@ async function exportHtml() {
   flex-wrap: wrap;
   padding: 8px 16px;
   backdrop-filter: blur(12px);
-}
-
-.skin-weibo .browse-bar {
-  background: rgba(255, 255, 255, 0.92);
-  border-bottom: 1px solid #e6e6e6;
-}
-
-.skin-twitter .browse-bar {
-  background: rgba(0, 0, 0, 0.85);
-  border-bottom: 1px solid #2f3336;
+  background: var(--sa-bar-bg);
+  border-bottom: 1px solid var(--sa-edge);
 }
 
 .bar-left,
@@ -664,29 +646,14 @@ async function exportHtml() {
   font: inherit;
   font-size: 13px;
   cursor: pointer;
-}
-
-.skin-weibo .sort-toggle button {
-  border: 1px solid #e6e6e6;
+  border: 1px solid var(--sa-edge);
   background: transparent;
-  color: #939393;
+  color: var(--sa-muted);
 }
 
-.skin-weibo .sort-toggle button.active {
-  background: #ff8200;
-  border-color: #ff8200;
-  color: #fff;
-}
-
-.skin-twitter .sort-toggle button {
-  border: 1px solid #2f3336;
-  background: transparent;
-  color: #71767b;
-}
-
-.skin-twitter .sort-toggle button.active {
-  background: #1d9bf0;
-  border-color: #1d9bf0;
+.sort-toggle button.active {
+  background: var(--sa-accent);
+  border-color: var(--sa-accent);
   color: #fff;
 }
 
@@ -703,18 +670,9 @@ async function exportHtml() {
   border-radius: 999px;
   padding: 0 12px;
   font: inherit;
-}
-
-.skin-weibo .user-field select {
-  border: 1px solid #e6e6e6;
-  background: #fff;
-  color: #333;
-}
-
-.skin-twitter .user-field select {
-  border: 1px solid #2f3336;
-  background: #16181c;
-  color: #e7e9ea;
+  border: 1px solid var(--sa-edge);
+  background: var(--sa-field);
+  color: var(--sa-ink);
 }
 
 .ghost-btn,
@@ -729,29 +687,14 @@ async function exportHtml() {
 
 .ghost-btn {
   background: transparent;
-}
-
-.skin-weibo .ghost-btn {
-  border: 1px solid #e6e6e6;
-  color: #333;
-}
-
-.skin-twitter .ghost-btn {
-  border: 1px solid #536471;
-  color: #e7e9ea;
+  border: 1px solid var(--sa-edge);
+  color: var(--sa-ink);
 }
 
 .primary-btn {
   border: 0;
   color: #fff;
-}
-
-.skin-weibo .primary-btn {
-  background: #ff8200;
-}
-
-.skin-twitter .primary-btn {
-  background: #1d9bf0;
+  background: var(--sa-accent);
 }
 
 .primary-btn:disabled {
@@ -761,87 +704,16 @@ async function exportHtml() {
 
 .post-count {
   font-size: 13px;
-  opacity: 0.7;
+  color: var(--sa-muted);
 }
 
 .feed {
   max-width: 600px;
   margin: 0 auto;
   min-height: 70vh;
-}
-
-.skin-weibo .feed {
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-
-.skin-twitter .feed {
-  border-inline: 1px solid #2f3336;
-}
-
-.skin-instagram {
-  background: #fafafa;
-  color: #262626;
-}
-
-.skin-instagram .browse-bar {
-  background: rgba(255, 255, 255, 0.92);
-  border-bottom: 1px solid #dbdbdb;
-}
-
-.skin-instagram .sort-toggle button {
-  border: 1px solid #dbdbdb;
-  background: transparent;
-  color: #8e8e8e;
-}
-
-.skin-instagram .sort-toggle button.active {
-  background: #0095f6;
-  border-color: #0095f6;
-  color: #fff;
-}
-
-.skin-instagram .user-field select {
-  border: 1px solid #dbdbdb;
-  background: #fff;
-  color: #262626;
-}
-
-.skin-instagram .ghost-btn {
-  border: 1px solid #dbdbdb;
-  color: #262626;
-}
-
-.skin-instagram .primary-btn {
-  background: #0095f6;
-}
-
-.skin-instagram .feed {
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-
-.skin-instagram .cover {
-  background: linear-gradient(45deg, #f58529 0%, #dd2a7b 50%, #515bd4 100%);
-}
-
-.skin-instagram .profile-avatar {
-  background: #dd2a7b;
-  color: #fff;
-  border: 3px solid #fff;
-}
-
-.skin-instagram .profile-text p {
-  color: #8e8e8e;
-}
-
-.skin-instagram .feed-gap {
-  background: #fafafa;
-}
-
-.skin-instagram .skeleton-profile,
-.skin-instagram .skeleton-post {
-  background: #f7f7f7;
+  background: var(--sa-surface);
+  box-shadow: var(--sa-feed-shadow);
+  border-inline: var(--sa-feed-border);
 }
 
 .profile-card {
@@ -850,14 +722,7 @@ async function exportHtml() {
 
 .cover {
   height: 120px;
-}
-
-.skin-weibo .cover {
-  background: linear-gradient(180deg, #ff8200 0%, #ffb366 100%);
-}
-
-.skin-twitter .cover {
-  background: #333639;
+  background: var(--sa-cover);
 }
 
 .profile-main {
@@ -879,19 +744,9 @@ async function exportHtml() {
   font-size: 20px;
   font-weight: 700;
   flex-shrink: 0;
-}
-
-.skin-weibo .profile-avatar {
-  background: #ffb366;
+  background: var(--sa-avatar);
   color: #fff;
-  border: 3px solid #fff;
-}
-
-.skin-twitter .profile-avatar {
-  background: #536471;
-  color: #fff;
-  border: 4px solid #000;
-  margin-top: -36px;
+  border: 3px solid var(--sa-surface);
 }
 
 .profile-avatar img {
@@ -914,37 +769,17 @@ async function exportHtml() {
 .profile-text p {
   margin: 2px 0 0;
   font-size: 13px;
-}
-
-.skin-weibo .profile-text p {
-  color: #939393;
-}
-
-.skin-twitter .profile-text p {
-  color: #71767b;
+  color: var(--sa-muted);
 }
 
 .feed-gap {
   height: 8px;
-}
-
-.skin-weibo .feed-gap {
-  background: #f2f2f5;
-}
-
-.skin-twitter .feed-gap {
-  height: 0;
-  border-bottom: 1px solid #2f3336;
+  background: var(--sa-bg);
 }
 
 .skeleton-profile,
 .skeleton-post {
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
-}
-
-.skin-weibo .skeleton-profile,
-.skin-weibo .skeleton-post {
-  background: #f7f7f7;
+  background: var(--sa-log);
 }
 
 .skeleton-profile {
@@ -964,7 +799,7 @@ async function exportHtml() {
 
 .empty-state p {
   margin-bottom: 16px;
-  opacity: 0.7;
+  color: var(--sa-muted);
 }
 
 .empty-state.inner {

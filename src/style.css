@@ -4,59 +4,55 @@
   box-sizing: border-box;
 }
 
-html[data-skin='weibo'] {
+html[data-theme='light'],
+html:not([data-theme]) {
   color-scheme: light;
-  --sa-bg: #f2f2f5;
+  --sa-bg: #f4f4f5;
   --sa-surface: #ffffff;
-  --sa-ink: #333333;
-  --sa-muted: #939393;
-  --sa-accent: #ff8200;
-  --sa-hairline: #f0f0f0;
-  --sa-edge: #e6e6e6;
+  --sa-ink: #1a1a1a;
+  --sa-muted: #6b6b6b;
+  --sa-accent: #2563eb;
+  --sa-link: #2563eb;
+  --sa-entity: #2563eb;
+  --sa-hairline: #ebebeb;
+  --sa-edge: #d4d4d4;
   --sa-field: #ffffff;
-  --sa-action: #636363;
-  --sa-cover: linear-gradient(180deg, #ff8200 0%, #ffb366 100%);
-  --sa-danger: #e45d4a;
-  --sa-ok: #2f9d6a;
+  --sa-action: #525252;
+  --sa-cover: linear-gradient(180deg, #e4e4e7 0%, #d4d4d8 100%);
+  --sa-media-well: #f4f4f5;
+  --sa-avatar: #a1a1aa;
+  --sa-danger: #dc2626;
+  --sa-ok: #16a34a;
   --sa-log: #f7f7f7;
-  --sa-selection: #ff8200;
+  --sa-selection: #2563eb;
+  --sa-bar-bg: rgba(255, 255, 255, 0.92);
+  --sa-feed-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --sa-feed-border: none;
 }
 
-html[data-skin='instagram'] {
-  color-scheme: light;
-  --sa-bg: #fafafa;
-  --sa-surface: #ffffff;
-  --sa-ink: #262626;
-  --sa-muted: #8e8e8e;
-  --sa-accent: #0095f6;
-  --sa-hairline: #efefef;
-  --sa-edge: #dbdbdb;
-  --sa-field: #ffffff;
-  --sa-action: #8e8e8e;
-  --sa-cover: linear-gradient(45deg, #f58529 0%, #dd2a7b 50%, #515bd4 100%);
-  --sa-danger: #ed4956;
-  --sa-ok: #12a150;
-  --sa-log: #fafafa;
-  --sa-selection: #0095f6;
-}
-
-html[data-skin='twitter'],
-html:not([data-skin]) {
+html[data-theme='dark'] {
   color-scheme: dark;
-  --sa-bg: #000000;
-  --sa-surface: #000000;
-  --sa-ink: #e7e9ea;
-  --sa-muted: #71767b;
-  --sa-accent: #1d9bf0;
-  --sa-hairline: #2f3336;
-  --sa-edge: #2f3336;
-  --sa-field: #16181c;
-  --sa-action: #71767b;
-  --sa-cover: #333639;
-  --sa-danger: #f4212e;
-  --sa-ok: #00ba7c;
-  --sa-log: #16181c;
-  --sa-selection: #1d9bf0;
+  --sa-bg: #09090b;
+  --sa-surface: #09090b;
+  --sa-ink: #e4e4e7;
+  --sa-muted: #a1a1aa;
+  --sa-accent: #3b82f6;
+  --sa-link: #3b82f6;
+  --sa-entity: #3b82f6;
+  --sa-hairline: #27272a;
+  --sa-edge: #3f3f46;
+  --sa-field: #18181b;
+  --sa-action: #a1a1aa;
+  --sa-cover: #27272a;
+  --sa-media-well: #18181b;
+  --sa-avatar: #52525b;
+  --sa-danger: #f87171;
+  --sa-ok: #4ade80;
+  --sa-log: #18181b;
+  --sa-selection: #3b82f6;
+  --sa-bar-bg: rgba(9, 9, 11, 0.92);
+  --sa-feed-shadow: none;
+  --sa-feed-border: 1px solid var(--sa-hairline);
 }
 
 html,
@@ -107,16 +103,8 @@ button {
   margin: 0 auto;
   background: var(--sa-surface);
   min-height: calc(100vh - 58px);
-}
-
-html[data-skin='weibo'] .sa-sheet,
-html[data-skin='instagram'] .sa-sheet {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-
-html[data-skin='twitter'] .sa-sheet,
-html:not([data-skin]) .sa-sheet {
-  border-inline: 1px solid var(--sa-hairline);
+  box-shadow: var(--sa-feed-shadow);
+  border-inline: var(--sa-feed-border);
 }
 
 .sa-page {
@@ -218,11 +206,6 @@ html:not([data-skin]) .sa-sheet {
   background: transparent;
   border: 1px solid var(--sa-edge);
   color: var(--sa-ink);
-}
-
-html[data-skin='twitter'] .sa-btn-ghost,
-html:not([data-skin]) .sa-btn-ghost {
-  border-color: #536471;
 }
 
 .sa-btn-ghost:hover:not(:disabled) {

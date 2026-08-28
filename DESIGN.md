@@ -1,38 +1,29 @@
 ---
 name: Social Archiver
-description: Local Weibo, X, and Instagram archives that read like the source timelines.
+description: Local Weibo, X, and Instagram archives with unified light/dark reading chrome and platform-faithful post layout.
 colors:
-  weibo-saffron: "#ff8200"
-  weibo-topic: "#eb7350"
-  weibo-paper: "#f2f2f5"
-  weibo-surface: "#ffffff"
-  weibo-ink: "#333333"
-  weibo-muted: "#939393"
-  weibo-avatar: "#ffb366"
-  weibo-hairline: "#f0f0f0"
-  weibo-action: "#636363"
-  weibo-bar-edge: "#e6e6e6"
-  x-void: "#000000"
-  sky-link: "#1d9bf0"
-  x-text: "#e7e9ea"
-  x-muted: "#71767b"
-  x-hairline: "#2f3336"
-  x-surface: "#16181c"
-  x-banner: "#333639"
-  x-avatar: "#536471"
-  x-like: "#f91880"
-  x-repost: "#00ba7c"
-  ig-blue: "#0095f6"
-  ig-paper: "#fafafa"
-  ig-surface: "#ffffff"
-  ig-ink: "#262626"
-  ig-muted: "#8e8e8e"
-  ig-hairline: "#efefef"
-  ig-edge: "#dbdbdb"
-  ig-danger: "#ed4956"
-  ig-cover-start: "#f58529"
-  ig-cover-mid: "#dd2a7b"
-  ig-cover-end: "#515bd4"
+  paper: "#f4f4f5"
+  surface: "#ffffff"
+  ink: "#1a1a1a"
+  muted: "#6b6b6b"
+  accent: "#2563eb"
+  entity: "#2563eb"
+  hairline: "#ebebeb"
+  edge: "#d4d4d4"
+  media-well: "#f4f4f5"
+  avatar: "#a1a1aa"
+  cover-start: "#e4e4e7"
+  cover-end: "#d4d4d8"
+  void: "#09090b"
+  void-ink: "#e4e4e7"
+  void-muted: "#a1a1aa"
+  void-accent: "#3b82f6"
+  void-hairline: "#27272a"
+  void-edge: "#3f3f46"
+  void-field: "#18181b"
+  void-media: "#18181b"
+  danger: "#dc2626"
+  ok: "#16a34a"
 typography:
   display:
     fontFamily: "system-ui, \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", sans-serif"
@@ -178,53 +169,41 @@ components:
 
 ## Overview
 
-**Creative North Star: "The Local Mirror"**
+**Creative North Star: "The Local Reader"**
 
-The archive should look like the site it came from. Weibo posts sit on pale paper under Weibo Saffron; X posts sit in black under Sky Link; Instagram posts sit on app paper under IG Blue. Switching accounts switches rooms. Cache, browse, and settings share that room: picking a platform on the cache page (or opening an archive) paints the whole shell.
+The archive should read calmly on this machine. The whole app shares one light or dark theme (default light), toggled from the top bar. Post layout still follows the source platform: Weibo nine-grid, X rounded media frame, Instagram header row.
 
-Density is source-faithful: 15px body, 600px column, 1px hairlines, circular avatars, Weibo nine-grid, X 16px media, pill fields and actions. Offline `index.html` mirrors the same reading experience: Weibo light, X dark, or Instagram light (`igArchiveHtml` — brand gradient cover, IG Blue links, `#fafafa` paper). PRODUCT.md names the product Social Archiver; do not revive the old Media Harvester string.
+Density stays source-faithful: 15px body, 600px column, 1px hairlines, circular avatars, platform-specific media grids. Offline `index.html` uses the same unified light reader theme. PRODUCT.md names the product Social Archiver; do not revive the old Media Harvester string.
 
 **Key Characteristics:**
-- One source skin at a time (Weibo light, X dark, or Instagram light)
-- Source-faithful controls, not a generic dashboard
+- Two reader themes only: light (default) and dark (browse toggle)
+- Platform-faithful post structure, not platform-branded chrome
 - Hairline depth instead of stacked cards
 - System/CJK sans only; no display face
-- Offline HTML is the same mirror, not a restyle
+- Offline HTML matches the in-app reader, not a platform skin swap
 
 ## Colors
 
-Three complete palettes. Never mix Weibo Saffron onto X void, Sky Link onto Weibo paper, or IG Blue onto the wrong room.
+Two semantic palettes exposed as CSS variables (`--sa-*`). Browse can override them with `data-browse-theme`; the app shell defaults to light.
 
-### Primary
-- **Weibo Saffron**: Active tab, primary pill, verified badge, Weibo cover wash. Rare on the feed itself; the paper and ink do the reading.
-- **Sky Link**: Active tab, primary pill, @/hashtag, "打开原文". The only saturated color on X besides like/repost state.
-- **IG Blue**: Active tab, primary pill, @/hashtag on Instagram. The only saturated color on the Instagram feed besides the cover gradient.
+### Light (default)
+- **Paper** (`paper`): Page ground and the 8px band under the profile.
+- **Surface**: Feed column and posts.
+- **Ink**: Names and body.
+- **Muted**: Time, source, secondary profile line.
+- **Accent**: Primary pills, active sort, verified badge, selection.
+- **Entity**: @ and # in post body, “打开原文”.
+- **Hairline / Edge**: Post dividers, selects, ghost button borders.
+- **Media well**: Image/video placeholder ground.
+- **Cover**: Neutral gray wash on the profile header only.
 
-### Secondary
-- **Weibo Topic** (`weibo-topic`): @ and # in Weibo body text.
-- **X Like** / **X Repost**: Hover-only on action icons, matching the source network.
-
-### Neutral
-- **Weibo Paper**: Page ground and the 8px band under the profile.
-- **Weibo Surface**: Feed column and posts.
-- **Weibo Ink**: Names and body.
-- **Weibo Muted**: Time, source, secondary profile line.
-- **X Void**: Page and post ground.
-- **X Text**: Names and body.
-- **X Muted**: Handle, time, idle actions.
-- **X Hairline**: Column edge, post dividers, media frame.
-- **X Surface**: Media well and dark selects.
-- **IG Paper**: Instagram page ground and the 8px band under the profile.
-- **IG Surface**: Feed column and posts.
-- **IG Ink**: Names and body.
-- **IG Muted**: Handle, time, secondary profile line.
-- **IG Hairline / IG Edge**: Post dividers, selects, ghost button borders.
-- **IG Cover**: The brand gradient (amber → magenta → indigo) on the profile cover only.
+### Dark (browse toggle)
+- **Void** ground and surface, **void-ink** text, **void-muted** meta, **void-accent** actions. Same structure as light; no platform tint.
 
 ### Named Rules
-**The One Skin Rule.** A screen is Weibo, X, or Instagram, never mixed. Accents, selection color, and hairlines all come from the active skin.
+**The Two-Theme Rule.** Only light or dark chrome. Never reintroduce per-platform accent colors in browse chrome.
 
-**The Whole-Shell Rule.** Cache, browse, and settings inherit the active skin. Do not keep a third “tool” palette for operator pages.
+**The Layout-Not-Livery Rule.** Platform differences live in post structure (grid, media frame, meta row), not in toolbar or shell color.
 
 ## Typography
 
@@ -243,18 +222,18 @@ Three complete palettes. Never mix Weibo Saffron onto X void, Sky Link onto Weib
 - **Code** (400, 12px, ui-monospace): Cache log lines and inline field hints.
 
 ### Named Rules
-**The Same-Face Rule.** One family for chrome, names, and posts. Do not pair a display face onto the mirror.
+**The Same-Face Rule.** One family for chrome, names, and posts. Do not pair a display face onto the reader.
 
 ## Layout
 
-Browse is full-bleed under a thin tab strip. The feed is a 600px column: Weibo as a white sheet on paper; X as a void column edged with hairlines. Sticky archive bar is 8px 16px with a 12px blur. Posts pad 12px 16px. Weibo media maxes near 360px with 4px gutters; X media maxes near 510px with 2px gutters and a 16px clip. Avatar is 50px on Weibo posts, 40px on X, 72px on the profile. Empty states are centered, quiet, no illustration.
+Browse is full-bleed under a thin tab strip. The feed is a 600px column on paper (light) or void (dark). Sticky archive bar is 8px 16px with a 12px blur. Theme toggle lives in the app top bar. Posts pad 12px 16px. Weibo media maxes near 360px with 4px gutters; X media maxes near 510px with 2px gutters and a 16px clip. Avatar is 50px on Weibo/IG posts, 40px on X, 72px on the profile. Empty states are centered, quiet, no illustration.
 
 ## Elevation & Depth
 
-Almost flat. Weibo’s only lift is a faint column shadow (`0 1px 3px rgba(0,0,0,0.06)`). Everything else is a 1px hairline or a cover block. X has no shadows; depth is the `#2f3336` rule and the 16px media well.
+Almost flat. Light mode’s only lift is a faint column shadow (`0 1px 3px rgba(0,0,0,0.06)`). Dark mode uses a 1px hairline column edge instead. Everything else is a 1px hairline or a cover block.
 
 ### Shadow Vocabulary
-- **Weibo column** (`box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06)`): The 600px sheet only. Not on individual posts.
+- **Light column** (`box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06)`): The 600px sheet only. Not on individual posts.
 
 ### Named Rules
 **The Hairline Rule.** Posts separate with 1px dividers. Do not wrap each post in a card, radius, or extra shadow.
@@ -265,49 +244,49 @@ Circles for people (avatars, Weibo V). Pills for archive chrome (select, primary
 
 ## Components
 
-Source-faithful: if Weibo or X would show it that way, so does the archive.
+Source-faithful layout: if Weibo or X would show it that way, so does the archive. Chrome color comes from the active light/dark theme only.
 
 ### Buttons
 - **Shape:** Full pill (999px), 32px tall, 14px horizontal padding, 13px type.
-- **Primary:** Weibo Saffron, Sky Link, or IG Blue fill, white label, no border.
-- **Ghost:** Transparent; Weibo 1px bar-edge, X 1px avatar-gray (`x-avatar`).
+- **Primary:** `--sa-accent` fill, white label, no border.
+- **Ghost:** Transparent, 1px `--sa-edge`, `--sa-ink` label.
 - **Hover / Focus:** Primary pills do not grow shadows. Disabled primary is 0.6 opacity.
 
 ### Cards / Containers
 - **Corner Style:** None on posts. 16px only on X media.
-- **Background:** Weibo Surface or X Void.
-- **Shadow Strategy:** Column only, see Elevation.
-- **Border:** Weibo post bottom `#f0f0f0`; X post bottom `#2f3336`.
+- **Background:** `--sa-surface`.
+- **Shadow Strategy:** Light column only, see Elevation.
+- **Border:** Post bottom `--sa-hairline`.
 - **Internal Padding:** 12px 16px.
 
 ### Inputs / Fields
-- **Style:** Pill select, 32px, 12px padding. Weibo white + bar-edge; X surface + hairline.
-- **Focus:** Browser default on the documented skin; do not add Element glow.
+- **Style:** Pill select, 32px, 12px padding. `--sa-field` + `--sa-edge`.
+- **Focus:** Browser default on the documented theme; do not add Element glow.
 
 Settings cookie rows are a compact name + masked value + ghost/danger pills, same 13px type as other operator fields. Do not show the raw cookie.
 
 ### Navigation
-Thin product tabs in the sticky app bar. Weibo: paper strip, Saffron underline on the active pill. X: void strip, Sky Link underline. Brand lockup is “Social Archiver” plus 社交存档.
+Thin product tabs in the sticky app bar. Active tab uses `--sa-accent` underline. Brand lockup is “Social Archiver” plus 社交存档. Theme toggle (“深色 / 浅色”) sits in the top bar beside the tabs.
 
 ### App icon
-Rounded-square desktop mark on charcoal (`#111111`). Center motif: three isometric stacked plates in Weibo Saffron, Sky Link cyan, and Instagram magenta — layered archive, not a literal platform logo. Source PNGs live in `icons/social-archiver-icon-1024.png` (and `-512`); alternate drafts in `icons/previews/`; `scripts/write_icon.py` strips AI white margins then emits `icons/icon.ico` for Electron. No text in the glyph; readable at 16px.
+Rounded-square desktop mark on charcoal (`#111111`). Center motif: three isometric stacked plates in saffron, sky cyan, and magenta — layered archive, not a literal platform logo. Source PNGs live in `icons/social-archiver-icon-1024.png` (and `-512`); alternate drafts in `icons/previews/`; `scripts/write_icon.py` strips AI white margins then emits `icons/icon.ico` for Electron. No text in the glyph; readable at 16px.
 
 ### Signature: Timeline post
-Left avatar, right body. Weibo: name + optional V, body with topic color (`#eb7350` for @/#), nine-grid, then time / 来自 / 查看原文. Live photos occupy one cell: still JPEG, hover plays the motion, `LIVE` badge bottom-left (10px/700, 18px tall, `rgba(0,0,0,0.55)`). Regular video cells are 16:9 with native controls. X: name + @handle + · time + 打开原文, body with Sky Link entities, rounded media; GIFs and videos use controls, never a LIVE badge. Instagram: name + @handle + time, body with IG Blue (`#0095f6`) @/# entities, square grid, no LIVE badge; in-app cards and offline HTML use this header, not the Weibo meta row. If the window cannot decode a file, the cell becomes a short fallback with `color: inherit` on X dark — Weibo Saffron 「用系统播放器打开」 / 「打开实况」, Sky Link on X, IG Blue on Instagram. No live 转发/评论/赞 or reply/repost/like row — those are not actionable in a local archive.
+Left avatar, right body. Weibo: name + optional V, body with `--sa-entity` for @/# (or `#topic#` on Weibo), nine-grid, then time / 来自 / 查看原文. Live photos occupy one cell: still JPEG, hover plays the motion, `LIVE` badge bottom-left (10px/700, 18px tall, `rgba(0,0,0,0.55)`). Regular video cells are 16:9 with native controls. X: name + @handle + · time + 打开原文, body with `--sa-entity` entities, rounded media; GIFs and videos use controls, never a LIVE badge. Instagram: name + @handle + time, body with `--sa-entity` @/# entities, square grid, no LIVE badge; in-app cards and offline HTML use this header, not the Weibo meta row. If the window cannot decode a file, the cell becomes a short fallback with `color: inherit` — accent pill 「用系统播放器打开」 / 「打开实况」. No live 转发/评论/赞 or reply/repost/like row — those are not actionable in a local archive.
 
 ### Signature: Profile header
-120px cover (Weibo Saffron→avatar wash, X banner gray, Instagram brand gradient), overlapping circular avatar from `_avatar.*` or the first letter of the display name, 20px/800 name, 13px muted id line (Weibo `微博 / id`, X and Instagram `@handle`), then an 8px paper band (Weibo, Instagram) or hairline (X).
+120px neutral cover (`--sa-cover`), overlapping circular avatar from `_avatar.*` or the first letter of the display name, 20px/800 name, 13px muted platform/id line (`微博 / id`, `X / id`, or `Instagram / id`), then an 8px paper band.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** switch the entire app shell (ground, tabs, pills, fields, posts, selection) with the active skin.
+- **Do** switch the entire app shell (ground, tabs, pills, fields, posts, selection) with the active light/dark theme.
 - **Do** keep the feed at 600px and posts flush, divided by hairlines.
-- **Do** use Weibo Saffron, Sky Link, and IG Blue as the only primary fills in their rooms.
-- **Do** match offline HTML to the same skins (Weibo / X / Instagram each export their own room).
+- **Do** use `--sa-accent` as the only primary fill in chrome.
+- **Do** match offline HTML to the same reader theme and tokens.
 
 ### Don't:
 - **Don't** carry the purple `#667eea–#764ba2` header or Element primary `#409eff` into cache, browse, settings, or export.
-- **Don't** mix Weibo Saffron onto X Void or Sky Link onto Weibo Paper.
+- **Don't** reintroduce per-platform accent colors (Weibo orange, Sky Link, IG blue) in browse chrome.
 - **Don't** card-stack posts, add display serifs, or invent a third “product” palette for reading.
 - **Don't** treat “Media Harvester” as a mark to typeset or illustrate.

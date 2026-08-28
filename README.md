@@ -2,7 +2,7 @@
 
 本机缓存微博、X 和 Instagram 的**原创**帖子（文字 + 图片/视频/实况），按源站时间线浏览，同一目录可增量更新。
 
-微博浅色、X 深色、Instagram 浅色。浏览页像源站时间线，支持批量管理已存档用户；缓存成功会写 `{platform}/{user_id}/index.html`。窗口聚焦时 `Ctrl+1/2/3` 切换缓存 / 浏览 / 设置。
+统一浅色/深色阅读主题（默认浅色），帖子布局仍按平台区分。浏览页支持批量管理已存档用户；缓存成功会写 `{platform}/{user_id}/index.html`。顶栏可切换深色/浅色，离线页同步支持。窗口聚焦时 `Ctrl+1/2/3` 切换缓存 / 浏览 / 设置。
 
 ## 打开开发版
 
@@ -31,7 +31,7 @@ npm.cmd run electron:build
 
 产物：
 
-- `dist-electron\SocialArchiver-0.5.3-win.zip` — 解压后运行 `Social Archiver.exe`
+- `dist-electron\SocialArchiver-0.5.4-win.zip` — 解压后运行 `Social Archiver.exe`
 - `dist-electron\win-unpacked\` — 同上，开发机可直接跑这一份，不必每次解压 zip
 
 **不要只拷贝 exe**：必须保留整个 `win-unpacked` 目录（含 `resources\backend\backend.exe` 和 `_internal`）。打包版缓存日志已是 UTF-8 中文，不再乱码。
@@ -48,4 +48,4 @@ npm.cmd run electron:build
 |------|--------|
 | [交接文档.md](交接文档.md) | 开发说明、已测范围、微博/X 怎么拉、别踩的坑。人和 agent 都读这个。 |
 | [PRODUCT.md](PRODUCT.md) | 产品边界（给设计工具用，不要当启动手册） |
-| [DESIGN.md](DESIGN.md) | 微博浅色 / X 深色 / Instagram 浅色视觉规则（改界面时看） |
+| [DESIGN.md](DESIGN.md) | 浅色/深色阅读主题与平台帖子布局规则（改界面时看） |

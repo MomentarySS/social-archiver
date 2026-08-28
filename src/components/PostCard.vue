@@ -1,5 +1,5 @@
 <template>
-  <article v-if="skin !== 'twitter'" :class="skin === 'instagram' ? 'ig-post' : 'wb-post'">
+  <article v-if="platform !== 'twitter'" :class="platform === 'instagram' ? 'ig-post' : 'wb-post'">
     <button class="wb-avatar" type="button" tabindex="-1">
       <img v-if="avatarUrl" :src="avatarUrl" alt="" />
       <span v-else>{{ initial }}</span>
@@ -7,8 +7,8 @@
     <div class="wb-body">
       <div class="wb-name-row">
         <span class="wb-name">{{ displayName }}</span>
-        <span v-if="post.verified && skin === 'weibo'" class="wb-vip" title="微博认证">V</span>
-        <template v-if="skin === 'instagram'">
+        <span v-if="post.verified && platform === 'weibo'" class="wb-vip" title="微博认证">V</span>
+        <template v-if="platform === 'instagram'">
           <span class="ig-handle">@{{ handle }}</span>
           <span class="ig-time">{{ weiboTime }}</span>
         </template>
@@ -103,7 +103,7 @@
           </template>
         </div>
       </div>
-      <div v-if="skin !== 'instagram'" class="wb-meta">
+      <div v-if="platform !== 'instagram'" class="wb-meta">
         <span>{{ weiboTime }}</span>
         <span v-if="post.source">来自 {{ post.source }}</span>
         <a
@@ -210,6 +210,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { groupLiveMedia } from '../utils/livePhoto.js'
 import { localAssetUrl } from '../utils/assetUrl.js'
+import { detectPostPlatform } from '../utils/postPlatform.js'
 
 interface Pic {
   filename?: string
@@ -288,16 +289,7 @@ watch(
   { immediate: true },
 )
 
-const skin = computed(() => {
-  const platform = (props.post.platform || '').toLowerCase()
-  if (platform === 'twitter' || platform === 'x') return 'twitter'
-  if (platform === 'instagram') return 'instagram'
-  if (platform === 'weibo') return 'weibo'
-  const url = props.post.url || ''
-  if (/x\.com|twitter\.com/i.test(url)) return 'twitter'
-  if (/instagram\.com/i.test(url)) return 'instagram'
-  return 'weibo'
-})
+const platform = computed(() => detectPostPlatform(props.post))
 
 const displayName = computed(() =>
   props.post.user_name || props.post.screen_name || props.post.user_id || '用户',
@@ -327,7 +319,7 @@ const weiboTime = computed(() => formatWeiboTime(parsedDate.value, props.post.cr
 
 const xTime = computed(() => formatXTime(parsedDate.value, props.post.created_at || props.post.date || ''))
 
-const weiboText = computed(() => formatRichText(props.post.text || '', skin.value === 'instagram' ? 'instagram' : 'weibo'))
+const weiboText = computed(() => formatRichText(props.post.text || '', platform.value === 'instagram' ? 'instagram' : 'weibo'))
 
 const xText = computed(() => formatRichText(props.post.text || '', 'twitter'))
 
@@ -567,18 +559,9 @@ function pad(n: number) {
   display: flex;
   gap: 10px;
   text-align: left;
-}
-
-.wb-post {
   padding: 12px 16px;
-  background: #fff;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.ig-post {
-  padding: 12px 16px;
-  background: #fff;
-  border-bottom: 1px solid #efefef;
+  background: var(--sa-surface);
+  border-bottom: 1px solid var(--sa-hairline);
 }
 
 .wb-avatar,
@@ -590,14 +573,15 @@ function pad(n: number) {
   padding: 0;
   overflow: hidden;
   flex-shrink: 0;
-  background: #ffb366;
+  background: var(--sa-avatar);
   color: #fff;
   font-weight: 700;
   font-size: 20px;
 }
 
-.ig-post .wb-avatar {
-  background: #dd2a7b;
+.x-avatar {
+  width: 40px;
+  height: 40px;
 }
 
 .wb-avatar img,
@@ -615,26 +599,33 @@ function pad(n: number) {
   min-width: 0;
 }
 
-.wb-name {
-  color: #333;
+.wb-name,
+.x-name {
+  color: var(--sa-ink);
   font-weight: 700;
   font-size: 15px;
 }
 
-.ig-post .wb-name {
-  color: #262626;
-}
-
-.wb-name-row {
+.wb-name-row,
+.x-head {
   display: flex;
   align-items: baseline;
   gap: 6px;
   flex-wrap: wrap;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.x-head {
+  gap: 4px;
 }
 
 .ig-handle,
-.ig-time {
-  color: #8e8e8e;
+.ig-time,
+.x-handle,
+.x-dot,
+.x-time {
+  color: var(--sa-muted);
   font-size: 13px;
   font-weight: 400;
 }
@@ -645,7 +636,7 @@ function pad(n: number) {
   height: 14px;
   margin-left: 4px;
   border-radius: 50%;
-  background: #ff8200;
+  background: var(--sa-accent);
   color: #fff;
   font-size: 10px;
   font-weight: 800;
@@ -654,22 +645,27 @@ function pad(n: number) {
   vertical-align: middle;
 }
 
-.wb-text {
+.wb-text,
+.x-text {
   margin-top: 6px;
   font-size: 15px;
   line-height: 1.6;
-  color: #333;
+  color: var(--sa-ink);
   word-break: break-word;
 }
 
-.wb-text :deep(.wb-topic),
-.wb-text :deep(.wb-at) {
-  color: #eb7350;
+.x-text {
+  margin-top: 4px;
+  line-height: 1.5;
 }
 
+.wb-text :deep(.wb-topic),
+.wb-text :deep(.wb-at),
 .wb-text :deep(.ig-topic),
-.wb-text :deep(.ig-at) {
-  color: #0095f6;
+.wb-text :deep(.ig-at),
+.x-text :deep(.x-hash),
+.x-text :deep(.x-at) {
+  color: var(--sa-entity);
 }
 
 .wb-media {
@@ -716,14 +712,14 @@ function pad(n: number) {
   border: 0;
   padding: 0;
   background: none;
-  color: #636363;
+  color: var(--sa-action);
   font: inherit;
   font-size: 13px;
   cursor: pointer;
 }
 
 .wb-expand-bar button:hover {
-  color: #eb7350;
+  color: var(--sa-entity);
 }
 
 .wb-expand-bar svg {
@@ -733,7 +729,7 @@ function pad(n: number) {
 
 .wb-expand-stage {
   position: relative;
-  background: #f2f2f5;
+  background: var(--sa-media-well);
 }
 
 .wb-expand-stage img,
@@ -742,7 +738,7 @@ function pad(n: number) {
   max-height: 520px;
   object-fit: contain;
   display: block;
-  background: #f2f2f5;
+  background: var(--sa-media-well);
 }
 
 .wb-cell {
@@ -751,7 +747,7 @@ function pad(n: number) {
   overflow: hidden;
   border: 0;
   padding: 0;
-  background: #f2f2f5;
+  background: var(--sa-media-well);
   cursor: pointer;
 }
 
@@ -790,14 +786,10 @@ function pad(n: number) {
   padding: 0 10px;
   border: 0;
   border-radius: 4px;
-  background: #ff8200;
+  background: var(--sa-accent);
   color: #fff;
   font-size: 12px;
   cursor: pointer;
-}
-
-.x-cell .video-fallback button {
-  background: #1d9bf0;
 }
 
 .live-open {
@@ -856,109 +848,40 @@ function pad(n: number) {
 .wb-media.count-1 .wb-cell img,
 .wb-media.count-1 .wb-cell video {
   object-fit: contain;
-  background: #f7f7f7;
+  background: var(--sa-log);
 }
 
-.wb-meta {
+.wb-meta,
+.ig-meta {
   margin-top: 8px;
   font-size: 12px;
-  color: #939393;
+  color: var(--sa-muted);
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-.wb-open {
-  color: #eb7350;
+.wb-open,
+.ig-open,
+.x-open {
+  color: var(--sa-link);
   text-decoration: none;
-}
-
-.wb-open:hover {
-  text-decoration: underline;
-}
-
-.ig-meta {
-  margin-top: 8px;
-  font-size: 12px;
-}
-
-.ig-open {
-  color: #0095f6;
-  text-decoration: none;
-}
-
-.ig-open:hover {
-  text-decoration: underline;
-}
-
-.ig-post .wb-text {
-  color: #262626;
-}
-
-.ig-post .video-fallback button,
-.ig-post .live-open {
-  background: #0095f6;
-}
-
-.x-post {
-  padding: 12px 16px;
-  border-bottom: 1px solid #2f3336;
-  background: #000;
-}
-
-.x-avatar {
-  width: 40px;
-  height: 40px;
-  background: #536471;
-}
-
-.x-head {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  flex-wrap: wrap;
-  font-size: 15px;
-  line-height: 1.3;
-}
-
-.x-name {
-  color: #e7e9ea;
-  font-weight: 700;
-}
-
-.x-handle,
-.x-dot,
-.x-time {
-  color: #71767b;
+  font-size: 13px;
 }
 
 .x-open {
   margin-left: auto;
-  color: #1d9bf0;
-  font-size: 13px;
-  text-decoration: none;
 }
 
+.wb-open:hover,
+.ig-open:hover,
 .x-open:hover {
   text-decoration: underline;
 }
 
-.x-text {
-  margin-top: 4px;
-  font-size: 15px;
-  line-height: 1.5;
-  color: #e7e9ea;
-  word-break: break-word;
-}
-
-.x-text :deep(.x-hash),
-.x-text :deep(.x-at) {
-  color: #1d9bf0;
-}
-
 .x-media {
   margin-top: 12px;
-  border: 1px solid #2f3336;
+  border: 1px solid var(--sa-hairline);
   border-radius: 16px;
   overflow: hidden;
   display: grid;
@@ -992,7 +915,7 @@ function pad(n: number) {
   max-height: 510px;
   border: 0;
   padding: 0;
-  background: #16181c;
+  background: var(--sa-media-well);
   cursor: pointer;
 }
 
@@ -1042,7 +965,7 @@ function pad(n: number) {
   padding: 0 14px;
   border: 0;
   border-radius: 999px;
-  background: #1d9bf0;
+  background: var(--sa-accent);
   color: #fff;
   font-size: 13px;
   cursor: pointer;
