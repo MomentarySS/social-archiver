@@ -4,6 +4,8 @@ import {
   cookieForUser,
   cookieForPlatform,
   hasUsableCookie,
+  maskCookie,
+  cookieInventory,
 } from './session.js'
 
 const mockSettings = (cookies: Record<string, unknown>) => ({ cookies })
@@ -73,5 +75,28 @@ describe('hasUsableCookie', () => {
     expect(hasUsableCookie('weibo', 'short=12')).toBe(false)
     expect(hasUsableCookie('weibo', 'some_cookie_value')).toBe(false)
     expect(hasUsableCookie('weibo', 'SUB=ok')).toBe(true)
+  })
+})
+
+describe('maskCookie', () => {
+  it('masks long cookies and leaves empty as empty', () => {
+    expect(maskCookie('')).toBe('')
+    expect(maskCookie('short')).toBe('••••')
+    expect(maskCookie('auth_token=abcdefghijklmnop')).toBe('auth_tok…mnop')
+  })
+})
+
+describe('cookieInventory', () => {
+  it('always lists three platforms and any per-user keys', () => {
+    const { platformRows, userRows } = cookieInventory({
+      cookies: {
+        weibo: 'SUB=abc',
+        per_user: { 'twitter:amd': 'auth_token=x' },
+      },
+    } as any)
+    expect(platformRows.map((row: { platform: string }) => row.platform)).toEqual(['weibo', 'twitter', 'instagram'])
+    expect(platformRows[0].value).toBe('SUB=abc')
+    expect(userRows).toHaveLength(1)
+    expect(userRows[0].userId).toBe('amd')
   })
 })

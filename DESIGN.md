@@ -284,6 +284,8 @@ Source-faithful: if Weibo or X would show it that way, so does the archive.
 - **Style:** Pill select, 32px, 12px padding. Weibo white + bar-edge; X surface + hairline.
 - **Focus:** Browser default on the documented skin; do not add Element glow.
 
+Settings cookie rows are a compact name + masked value + ghost/danger pills, same 13px type as other operator fields. Do not show the raw cookie.
+
 ### Navigation
 Thin product tabs in the sticky app bar. Weibo: paper strip, Saffron underline on the active pill. X: void strip, Sky Link underline. Brand lockup is “Social Archiver” plus 社交存档.
 

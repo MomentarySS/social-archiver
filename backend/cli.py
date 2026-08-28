@@ -51,6 +51,7 @@ def main():
     parser.add_argument("--platform", required=True, choices=["twitter", "weibo", "instagram"])
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--cookie", default="")
+    parser.add_argument("--cookie-file", default="")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--start-date", default="")
     parser.add_argument("--end-date", default="")
@@ -58,11 +59,22 @@ def main():
     parser.add_argument("--naming-template", default="{post_id}_{index}")
     args = parser.parse_args()
 
+    cookie = args.cookie or ""
+    if args.cookie_file:
+        try:
+            with open(args.cookie_file, encoding="utf-8") as handle:
+                cookie = handle.read().strip()
+        except OSError as e:
+            _emit({"type": "error", "msg": f"无法读取 Cookie 文件: {e}"})
+            sys.exit(1)
+    if not cookie:
+        cookie = os.environ.get("SOCIAL_ARCHIVER_COOKIE", "")
+
     try:
         for event in download_media(
             platform=args.platform,
             user_id=args.user_id,
-            cookie=args.cookie,
+            cookie=cookie,
             output_dir=args.output_dir,
             start_date=args.start_date or None,
             end_date=args.end_date or None,
