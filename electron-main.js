@@ -3,6 +3,8 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const { Readable } = require('stream');
+const { createJsonLineParser } = require('./json-lines');
+const { applySettingsPatch } = require('./settings-merge');
 
 // ========== Debug Logging ==========
 const debugLogPath = path.join(app.getPath('userData'), 'weibo-login-debug.log');
@@ -124,33 +126,32 @@ function byteRange(size, header) {
   return { start, end };
 }
 
-function asBody(buf) {
-  const copy = new Uint8Array(buf.byteLength);
-  copy.set(buf);
-  return copy;
-}
-
 function fileResponse(filePath, request) {
   const stat = fs.statSync(filePath);
   const mime = mimeForAsset(filePath) || 'application/octet-stream';
-  const maxBuffer = 100 * 1024 * 1024;
-  const data = stat.size <= maxBuffer ? fs.readFileSync(filePath) : null;
-  const range = byteRange(stat.size, request.headers.get('Range'));
+  const etag = `"${stat.size}-${Math.trunc(stat.mtimeMs)}"`;
   const headers = {
     'Content-Type': mime,
     'Accept-Ranges': 'bytes',
-    'Cache-Control': 'public, max-age=0',
+    'Cache-Control': 'public, max-age=31536000, immutable',
+    'ETag': etag,
     'Access-Control-Allow-Origin': '*',
   };
+  if (request.headers.get('If-None-Match') === etag && !request.headers.get('Range')) {
+    return new Response(null, { status: 304, headers });
+  }
+  const maxBuffer = 100 * 1024 * 1024;
+  const data = stat.size <= maxBuffer ? fs.readFileSync(filePath) : null;
+  const range = byteRange(stat.size, request.headers.get('Range'));
   if (data) {
     if (!range) {
       headers['Content-Length'] = String(data.byteLength);
-      return new Response(asBody(data), { status: 200, headers });
+      return new Response(data, { status: 200, headers });
     }
     const slice = data.subarray(range.start, range.end + 1);
     headers['Content-Length'] = String(slice.byteLength);
     headers['Content-Range'] = `bytes ${range.start}-${range.end}/${data.byteLength}`;
-    return new Response(asBody(slice), { status: 206, headers });
+    return new Response(slice, { status: 206, headers });
   }
   if (!range) {
     headers['Content-Length'] = String(stat.size);
@@ -205,6 +206,9 @@ app.whenReady().then(() => {
       if (!filePath || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
         return new Response('Not Found', { status: 404 });
       }
+      if (!isAssetAllowed(filePath)) {
+        return new Response('Forbidden', { status: 403 });
+      }
       return fileResponse(filePath, request);
     } catch (e) {
       debugLog('ASSET_PROTOCOL: ' + (e && e.message ? e.message : String(e)));
@@ -213,6 +217,8 @@ app.whenReady().then(() => {
   });
 
   debugLog('App ready, creating main window');
+  const startupSettings = readSettings();
+  if (startupSettings.output_dir) rememberAssetRoot(startupSettings.output_dir);
   createWindow();
 });
 
@@ -251,22 +257,72 @@ function readSettings() {
   return {};
 }
 
-// ─── Batch Download Queue ───────────────────────────────────────────
+const assetRoots = new Set();
+let settingsWrite = Promise.resolve();
 
-function buildDownloadArgs(job) {
+function rememberAssetRoot(dir) {
+  if (!dir) return;
+  try {
+    assetRoots.add(path.resolve(dir));
+  } catch (_) { /* ignore */ }
+}
+
+function isAssetAllowed(filePath) {
+  if (!filePath) return false;
+  const target = path.resolve(filePath);
+  const roots = [];
+  for (const root of assetRoots) roots.push(root);
+  const settings = readSettings();
+  if (settings.output_dir) roots.push(path.resolve(settings.output_dir));
+  const targetCmp = process.platform === 'win32' ? target.toLowerCase() : target;
+  return roots.some((root) => {
+    const rootCmp = process.platform === 'win32' ? String(root).toLowerCase() : String(root);
+    const prefix = rootCmp.endsWith(path.sep) ? rootCmp : rootCmp + path.sep;
+    return targetCmp.startsWith(prefix);
+  });
+}
+
+function writeCookieFile(cookie) {
+  const dir = path.join(app.getPath('userData'), 'cookie-tmp');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `c-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+  fs.writeFileSync(file, cookie || '', { encoding: 'utf8', mode: 0o600 });
+  return file;
+}
+
+function removeCookieFile(file) {
+  if (!file) return;
+  try { fs.unlinkSync(file); } catch (_) { /* ignore */ }
+}
+
+function spawnBackendJob(job) {
   const settings = readSettings();
   const backendInfo = resolveBackendPath();
+  const cookieFile = writeCookieFile(job.cookie);
   const args = [
     ...backendInfo.args,
     '--platform', job.platform,
     '--user-id', job.userId,
-    '--cookie', job.cookie || '',
+    '--cookie-file', cookieFile,
     '--output-dir', job.outputDir,
     '--concurrent', String(job.concurrent || settings.concurrent || 3),
     '--naming-template', job.namingTemplate || settings.naming_template || '{post_id}_{index}',
   ];
-  return { backendInfo, args };
+  if (job.startDate) args.push('--start-date', job.startDate);
+  if (job.endDate) args.push('--end-date', job.endDate);
+  rememberAssetRoot(job.outputDir);
+  const proc = spawn(backendInfo.program, args, {
+    cwd: backendInfo.cwd,
+    windowsHide: true,
+    env: backendInfo.env,
+  });
+  const cleanup = () => removeCookieFile(cookieFile);
+  proc.on('close', cleanup);
+  proc.on('error', cleanup);
+  return proc;
 }
+
+// ─── Batch Download Queue ───────────────────────────────────────────
 
 function processQueue() {
   if (batchStopRequested) {
@@ -291,7 +347,6 @@ function processQueue() {
   isBatchRunning = true;
   const job = downloadQueue.shift();
   currentBatchJob = job;
-  const { backendInfo, args } = buildDownloadArgs(job);
 
   mainWindow?.webContents.send('batch:event', {
     type: 'user-start',
@@ -303,11 +358,7 @@ function processQueue() {
   batchProcess = null;
   let proc;
   try {
-    proc = spawn(backendInfo.program, args, {
-      cwd: backendInfo.cwd,
-      windowsHide: true,
-      env: backendInfo.env,
-    });
+    proc = spawnBackendJob(job);
     batchProcess = proc;
   } catch (err) {
     mainWindow?.webContents.send('batch:event', {
@@ -323,27 +374,25 @@ function processQueue() {
     return;
   }
 
-  proc.stdout.on('data', (data) => {
-    const lines = data.toString('utf8').split('\n').filter(l => l.trim());
-    for (const raw of lines) {
-      try {
-        const evt = JSON.parse(raw);
-        if (evt.type === 'done') {
-          evt.userDir = path.join(job.outputDir, job.platform, job.userId);
-          // Update lastUpdate in _profile.json
-          updateProfileLastUpdate(evt.userDir);
-        }
-        mainWindow?.webContents.send('batch:event', { ...evt, userId: job.userId, platform: job.platform });
-      } catch (_) {
-        mainWindow?.webContents.send('batch:event', {
-          type: 'user-progress',
-          userId: job.userId,
-          platform: job.platform,
-          msg: raw,
-        });
+  const parser = createJsonLineParser(
+    (evt) => {
+      if (evt.type === 'done') {
+        evt.userDir = path.join(job.outputDir, job.platform, job.userId);
+        updateProfileLastUpdate(evt.userDir);
       }
-    }
-  });
+      mainWindow?.webContents.send('batch:event', { ...evt, userId: job.userId, platform: job.platform });
+    },
+    (raw) => {
+      mainWindow?.webContents.send('batch:event', {
+        type: 'user-progress',
+        userId: job.userId,
+        platform: job.platform,
+        msg: raw,
+      });
+    },
+  );
+
+  proc.stdout.on('data', (data) => parser.push(data));
 
   proc.stderr.on('data', (data) => {
     const msg = data.toString('utf8').trim();
@@ -358,6 +407,7 @@ function processQueue() {
   });
 
   proc.on('close', (code) => {
+    parser.flush();
     const userDir = path.join(job.outputDir, job.platform, job.userId);
     if (batchStopRequested) {
       currentBatchJob = null;
@@ -446,46 +496,32 @@ ipcMain.handle('start-download', async (event, { platform, userId, cookie, outpu
     return { success: false, error: '已有缓存任务进行中' };
   }
 
-  const settings = readSettings();
-  const backendInfo = resolveBackendPath();
-  const args = [
-    ...backendInfo.args,
-    '--platform', platform,
-    '--user-id', userId,
-    '--cookie', cookie || '',
-    '--output-dir', outputDir,
-    '--concurrent', String(concurrent || settings.concurrent || 3),
-    '--naming-template', namingTemplate || settings.naming_template || '{post_id}_{index}',
-  ];
-  if (startDate) {
-    args.push('--start-date', startDate);
-  }
-  if (endDate) {
-    args.push('--end-date', endDate);
-  }
-
   try {
-    downloadProcess = spawn(backendInfo.program, args, {
-      cwd: backendInfo.cwd,
-      windowsHide: true,
-      env: backendInfo.env,
+    downloadProcess = spawnBackendJob({
+      platform,
+      userId,
+      cookie,
+      outputDir,
+      startDate,
+      endDate,
+      concurrent,
+      namingTemplate,
     });
 
-    downloadProcess.stdout.on('data', (data) => {
-      const lines = data.toString('utf8').split('\n').filter(line => line.trim());
-      for (const line of lines) {
-        try {
-          const event = JSON.parse(line);
-          if (event.type === 'done') {
-            event.userDir = path.join(outputDir, platform, userId);
-            updateProfileLastUpdate(event.userDir);
-          }
-          mainWindow?.webContents.send('download:event', event);
-        } catch (e) {
-          mainWindow?.webContents.send('download:log', { msg: line });
+    const parser = createJsonLineParser(
+      (parsed) => {
+        if (parsed.type === 'done') {
+          parsed.userDir = path.join(outputDir, platform, userId);
+          updateProfileLastUpdate(parsed.userDir);
         }
-      }
-    });
+        mainWindow?.webContents.send('download:event', parsed);
+      },
+      (line) => {
+        mainWindow?.webContents.send('download:log', { msg: line });
+      },
+    );
+
+    downloadProcess.stdout.on('data', (data) => parser.push(data));
 
     downloadProcess.stderr.on('data', (data) => {
       const msg = data.toString('utf8').trim();
@@ -495,6 +531,7 @@ ipcMain.handle('start-download', async (event, { platform, userId, cookie, outpu
     });
 
     downloadProcess.on('close', (code) => {
+      parser.flush();
       downloadProcess = null;
       if (code !== 0) {
         mainWindow?.webContents.send('download:error', { msg: `缓存进程异常退出（代码 ${code}）` });
@@ -569,10 +606,11 @@ ipcMain.handle('select-output-dir', async () => {
       properties: ['openDirectory'],
       title: '选择下载目录',
     });
-    if (result.canceled) {
-      return null;
+    if (!result.canceled) {
+      rememberAssetRoot(result.filePaths[0]);
+      return result.filePaths[0];
     }
-    return result.filePaths[0];
+    return null;
   } catch (e) {
     return null;
   }
@@ -583,13 +621,15 @@ ipcMain.handle('get-settings', async () => {
 });
 
 ipcMain.handle('save-settings', async (event, settings) => {
-  try {
+  const run = settingsWrite.then(() => {
     const configPath = path.join(app.getPath('userData'), 'settings.json');
-    fs.writeFileSync(configPath, JSON.stringify(settings, null, 2), 'utf-8');
+    const next = applySettingsPatch(readSettings(), settings);
+    fs.writeFileSync(configPath, JSON.stringify(next, null, 2), 'utf-8');
+    if (next.output_dir) rememberAssetRoot(next.output_dir);
     return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+  }).catch((e) => ({ success: false, error: e.message }));
+  settingsWrite = run.then(() => {}, () => {});
+  return run;
 });
 
 // Browse archive IPC
@@ -599,6 +639,7 @@ ipcMain.handle('scan-archives', async (event, outputDir) => {
     if (!outputDir || !fs.existsSync(outputDir)) {
       return [];
     }
+    rememberAssetRoot(outputDir);
     const users = [];
     const entries = fs.readdirSync(outputDir, { withFileTypes: true });
     for (const entry of entries) {
@@ -653,6 +694,7 @@ ipcMain.handle('scan-archives', async (event, outputDir) => {
           platform,
           displayName,
           avatar: fs.existsSync(avatarPath) ? avatarPath : '',
+          lastUpdate: profile.lastUpdate || '',
         });
       }
     }
@@ -742,6 +784,7 @@ ipcMain.handle('get-posts', async (event, userDir) => {
     if (!userDir || !fs.existsSync(userDir)) {
       return [];
     }
+    rememberAssetRoot(userDir);
     const posts = [];
     const postsRoot = path.join(userDir, '_posts');
     if (!fs.existsSync(postsRoot)) return [];

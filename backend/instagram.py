@@ -74,6 +74,7 @@ def download_instagram_media(
         "videos": True,
         "sleep-request": "6.0-12.0",
         "cookies": {"sessionid": sessionid},
+        "archive": os.path.join(user_dir, ".download-archive.sqlite"),
     }
 
     if start_date or end_date:

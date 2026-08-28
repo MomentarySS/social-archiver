@@ -110,6 +110,8 @@ export interface BatchJob {
   outputDir: string
   concurrent: number
   namingTemplate: string
+  startDate?: string | null
+  endDate?: string | null
 }
 
 export interface BatchStatus {

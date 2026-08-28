@@ -120,7 +120,7 @@
         <div class="feed-gap"></div>
 
         <div v-if="displayedPosts.length" class="timeline">
-          <PostCard
+          <LazyPost
             v-for="post in displayedPosts"
             :key="`${sortOrder}:${post.id || post.url}`"
             :post="post"
@@ -137,10 +137,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import PostCard from '../components/PostCard.vue'
+import LazyPost from '../components/LazyPost.vue'
 import UserManager from '../components/UserManager.vue'
 import { writeArchiveHtml } from '../utils/archiveHtml.js'
 import { sortPosts } from '../utils/postTime.js'
+import { localAssetUrl } from '../utils/assetUrl.js'
 import { setAppPlatform } from '../skin.js'
 import { normalizePlatform } from '../constants'
 import {
@@ -196,13 +197,8 @@ watch(skin, (value) => {
   setAppPlatform(value)
 }, { immediate: true })
 
-watch(currentUser, async (user) => {
-  headerAvatar.value = ''
-  if (user?.avatar && window.electronAPI) {
-    try {
-      headerAvatar.value = await window.electronAPI.assetUrl(user.avatar)
-    } catch (e) { /* ignore */ }
-  }
+watch(currentUser, (user) => {
+  headerAvatar.value = user?.avatar ? localAssetUrl(user.avatar) : ''
 })
 
 onMounted(async () => {
@@ -230,6 +226,9 @@ async function chooseOutputDir() {
       const dir = await window.electronAPI.selectOutputDir()
       if (dir) {
         outputDir.value = dir
+        try {
+          await window.electronAPI.saveSettings({ output_dir: dir })
+        } catch (e) { /* ignore */ }
         await scanUsers()
       }
     }
@@ -245,19 +244,8 @@ async function scanUsers() {
   try {
     if (window.electronAPI) {
       const raw = await window.electronAPI.scanArchives(outputDir.value)
-      // Populate lastUpdate for each user
-      const enriched = await Promise.all(
-        raw.map(async (u: UserEntry) => {
-          try {
-            const lastUpdate = await window.electronAPI?.getUserLastUpdate(u.path)
-            return { ...u, lastUpdate: lastUpdate || undefined }
-          } catch {
-            return u
-          }
-        })
-      )
-      users.value = enriched
-      userList.value = enriched
+      users.value = raw
+      userList.value = raw
       if (users.value.length) {
         selectedUser.value = users.value[0].path
         await loadPosts()
@@ -295,42 +283,43 @@ async function refreshBrowse() {
   }
 }
 
-async function updateArchive() {
-  const user = currentUser.value
+async function loginForPlatform(platform: string) {
+  if (!window.electronAPI) return { success: false as const, cookie: '', error: '不可用' }
+  if (platform === 'twitter') return window.electronAPI.twitterLogin()
+  if (platform === 'instagram') return window.electronAPI.instagramLogin()
+  return window.electronAPI.weiboLogin()
+}
+
+async function ensureCookie(platform: string, userId: string) {
+  const settings = await window.electronAPI!.getSettings()
+  let cookie = cookieForUser(settings, platform, userId)
+    || cookieForPlatform(settings, platform)
+  if (hasUsableCookie(platform, cookie)) return cookie
+  toast.info(
+    platform === 'twitter' ? '需要登录 X，打开登录窗'
+      : platform === 'instagram' ? '需要登录 Instagram，打开登录窗'
+      : '需要登录微博，打开登录窗'
+  )
+  const res = await loginForPlatform(platform)
+  if (!res.success || !res.cookie) {
+    toast.error(res.error || '登录失败。也可到缓存页或设置页粘贴 Cookie。')
+    return ''
+  }
+  await saveUserCookie(platform, userId, res.cookie)
+  await savePlatformCookie(platform, res.cookie)
+  return res.cookie
+}
+
+async function startUserDownload(user: UserEntry, dates?: { startDate?: string; endDate?: string }) {
   if (!user || !outputDir.value || !window.electronAPI) return
   if (updating.value || await window.electronAPI.isDownloading()) {
     toast.warning('已有缓存任务进行中')
     return
   }
-
   const platform = normalizePlatform(user.platform, skin.value)
+  const cookie = await ensureCookie(platform, user.name)
+  if (!cookie) return
   const settings = await window.electronAPI.getSettings()
-  let cookie = cookieForUser(settings, platform, user.name)
-    || cookieForPlatform(settings, platform)
-
-  if (!hasUsableCookie(platform, cookie)) {
-    toast.info(
-      platform === 'twitter' ? '需要登录 X，打开登录窗'
-        : platform === 'instagram' ? '需要登录 Instagram，打开登录窗'
-        : '需要登录微博，打开登录窗'
-    )
-    let res
-    if (platform === 'twitter') {
-      res = await window.electronAPI.twitterLogin()
-    } else if (platform === 'instagram') {
-      res = await window.electronAPI.instagramLogin()
-    } else {
-      res = await window.electronAPI.weiboLogin()
-    }
-    if (!res.success || !res.cookie) {
-      toast.error(res.error || '登录失败。也可到缓存页粘贴 Cookie 后再更新。')
-      return
-    }
-    cookie = res.cookie
-    await saveUserCookie(platform, user.name, cookie)
-    await savePlatformCookie(platform, cookie)
-  }
-
   updating.value = true
   try {
     const res = await window.electronAPI.startDownload({
@@ -338,6 +327,8 @@ async function updateArchive() {
       userId: user.name,
       cookie,
       outputDir: outputDir.value,
+      startDate: dates?.startDate || null,
+      endDate: dates?.endDate || null,
       concurrent: settings.concurrent,
       namingTemplate: settings.naming_template,
     })
@@ -349,6 +340,12 @@ async function updateArchive() {
     updating.value = false
     toast.error('无法开始更新')
   }
+}
+
+async function updateArchive() {
+  const user = currentUser.value
+  if (!user) return
+  await startUserDownload(user)
 }
 
 async function stopUpdate() {
@@ -384,37 +381,7 @@ async function handleSelectUser(path: string) {
 }
 
 async function handleUpdateUser(user: UserEntry) {
-  if (await (window.electronAPI?.isDownloading() ?? Promise.resolve(false))) {
-    toast.warning('已有缓存任务进行中')
-    return
-  }
-  const platform = normalizePlatform(user.platform, skin.value)
-  const settings = await window.electronAPI!.getSettings()
-  let cookie = cookieForUser(settings, platform, user.name)
-
-  if (!hasUsableCookie(platform, cookie)) {
-    toast.info('需要先登录' + (platform === 'twitter' ? ' X' : platform === 'instagram' ? ' Instagram' : ' 微博'))
-    return
-  }
-
-  updating.value = true
-  try {
-    const res = await window.electronAPI!.startDownload({
-      platform,
-      userId: user.name,
-      cookie,
-      outputDir: outputDir.value,
-      concurrent: settings.concurrent,
-      namingTemplate: settings.naming_template,
-    })
-    if (!res.success) {
-      updating.value = false
-      toast.error(res.error || '无法开始更新')
-    }
-  } catch (e) {
-    updating.value = false
-    toast.error('无法开始更新')
-  }
+  await startUserDownload(user)
 }
 
 async function handleDeleteUser(user: UserEntry) {
@@ -445,6 +412,7 @@ async function handleBatchUpdate(selected: UserEntry[]) {
     selected.map(async (user) => {
       const platform = normalizePlatform(user.platform, 'weibo')
       const cookie = cookieForUser(settings, platform, user.name)
+        || cookieForPlatform(settings, platform)
       if (!hasUsableCookie(platform, cookie)) {
         return null
       }
@@ -493,28 +461,28 @@ async function handleBatchDelete(paths: string[]) {
   }
 }
 
-async function handleAddUser(data: { platform: string; userId: string; cookie: string }) {
+async function handleAddUser(data: { platform: string; userId: string; cookie: string; startDate?: string; endDate?: string }) {
   if (!window.electronAPI) return
+  if (!outputDir.value) {
+    toast.warning('请先选择存档目录')
+    return
+  }
   const settings = await window.electronAPI.getSettings()
 
-  // Save per-user cookie and as platform-level fallback
   await saveUserCookie(data.platform, data.userId, data.cookie)
   await savePlatformCookie(data.platform, data.cookie)
 
-  // Check if already exists in list
   const existing = users.value.find(
     (u) => u.name === data.userId && (u.platform || 'twitter') === data.platform
   )
   if (existing) {
-    // Just trigger update for existing user
     toast.info('该用户已存在，开始更新…')
     selectedUser.value = existing.path
     await loadPosts()
-    await handleUpdateUser(existing)
+    await startUserDownload(existing, { startDate: data.startDate, endDate: data.endDate })
     return
   }
 
-  // Start single download immediately
   updating.value = true
   batchRunning.value = false
   try {
@@ -523,6 +491,8 @@ async function handleAddUser(data: { platform: string; userId: string; cookie: s
       userId: data.userId,
       cookie: data.cookie,
       outputDir: outputDir.value,
+      startDate: data.startDate || null,
+      endDate: data.endDate || null,
       concurrent: settings.concurrent,
       namingTemplate: settings.naming_template,
     })
@@ -590,18 +560,8 @@ async function refreshCurrentArchive(userDir?: string, opts?: { silent?: boolean
   const api = window.electronAPI
   try {
     const raw = await api.scanArchives(outputDir.value)
-    const enriched = await Promise.all(
-      raw.map(async (u: UserEntry) => {
-        try {
-          const lastUpdate = await api.getUserLastUpdate(u.path)
-          return { ...u, lastUpdate: lastUpdate || undefined }
-        } catch {
-          return u
-        }
-      })
-    )
-    users.value = enriched
-    userList.value = enriched
+    users.value = raw
+    userList.value = raw
     if (keep && users.value.some((u) => u.path === keep)) {
       selectedUser.value = keep
     }

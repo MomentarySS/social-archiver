@@ -31,7 +31,7 @@ npm.cmd run electron:build
 
 产物：
 
-- `dist-electron\SocialArchiver-0.5.1-win.zip` — 解压后运行 `Social Archiver.exe`
+- `dist-electron\SocialArchiver-0.5.2-win.zip` — 解压后运行 `Social Archiver.exe`
 - `dist-electron\win-unpacked\` — 同上，开发机可直接跑这一份，不必每次解压 zip
 
 **不要只拷贝 exe**：必须保留整个 `win-unpacked` 目录（含 `resources\backend\backend.exe` 和 `_internal`）。打包版缓存日志已是 UTF-8 中文，不再乱码。
@@ -40,7 +40,7 @@ npm.cmd run electron:build
 
 开发仍用 `npm.cmd run electron:dev`，不要用 zip 里的 exe 做日常改代码。
 
-改完代码可跑 `npm.cmd test`（33 个 Vitest 用例）和 `npm.cmd run build`（`vue-tsc` + Vite）做快速自检。
+改完代码可跑 `npm.cmd test`（Vitest + Python unittest）和 `npm.cmd run build`（`vue-tsc` + Vite）做快速自检。
 
 ## 文档
 

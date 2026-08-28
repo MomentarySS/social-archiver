@@ -1,13 +1,13 @@
 {
   "name": "social-archiver",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.5.2",
   "main": "electron-main.js",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run && python -m unittest discover -s tests -t . -p \"test_*.py\"",
     "test:watch": "vitest",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron --disable-gpu --disable-features=WebGL,WebGL2,WebGLRenderingContext .\"",
     "electron:build": "python scripts/write_icon.py && npm run build && python scripts/build_backend.py && electron-builder --win"
@@ -41,6 +41,8 @@
       "dist/**/*",
       "electron-main.js",
       "preload.js",
+      "json-lines.js",
+      "settings-merge.js",
       "icons/icon.ico",
       "package.json"
     ],

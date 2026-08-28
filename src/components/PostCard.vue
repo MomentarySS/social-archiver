@@ -209,6 +209,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { groupLiveMedia } from '../utils/livePhoto.js'
+import { localAssetUrl } from '../utils/assetUrl.js'
 
 interface Pic {
   filename?: string
@@ -270,23 +271,19 @@ watch(
 
 watch(
   mediaItems,
-  async (pics) => {
-    const stills: string[] = []
-    const motions: string[] = []
-    for (const pic of pics || []) {
-      stills.push(await resolveAsset(pic.abs_path))
-      motions.push(pic.type === 'livephoto' ? await resolveAsset(videoPath(pic)) : '')
-    }
-    stillUrls.value = stills
-    videoUrls.value = motions
+  (pics) => {
+    stillUrls.value = (pics || []).map((pic: Pic) => localAssetUrl(pic.abs_path))
+    videoUrls.value = (pics || []).map((pic: Pic) => (
+      pic.type === 'livephoto' ? localAssetUrl(videoPath(pic)) : ''
+    ))
   },
   { immediate: true, deep: true },
 )
 
 watch(
   () => props.post.avatar_path,
-  async (path) => {
-    avatarUrl.value = await resolveAsset(path)
+  (path) => {
+    avatarUrl.value = localAssetUrl(path)
   },
   { immediate: true },
 )
@@ -340,16 +337,6 @@ const viewerMotion = computed(() => {
   if (!pic || pic.type !== 'livephoto') return ''
   return videoUrls.value[viewerIndex.value] || ''
 })
-
-async function resolveAsset(filePath?: string) {
-  if (!filePath) return ''
-  try {
-    if (window.electronAPI) {
-      return await window.electronAPI.assetUrl(filePath)
-    }
-  } catch (e) { /* ignore */ }
-  return filePath
-}
 
 function videoPath(pic: Pic) {
   if (pic.video_abs_path) return pic.video_abs_path

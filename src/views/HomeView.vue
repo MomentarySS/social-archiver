@@ -2,7 +2,7 @@
   <div class="sa-sheet">
     <div class="sa-page home-view">
       <h2>缓存原创</h2>
-      <p class="lede">只收该用户自己发的文字和媒体，转发不收。同一目录会增量更新，并刷新 index.html。</p>
+      <p class="lede">只收该用户自己发的文字和媒体，转发不收。同一目录会增量更新，并刷新 index.html。已存档的账号到浏览页更新即可。</p>
 
       <PlatformSelector v-model="platform" />
 
@@ -235,8 +235,7 @@ function formatDoneMessage(event: { count?: number; skipped?: number; posts?: nu
 async function persistOutputDir(dir: string) {
   if (!dir || !window.electronAPI) return
   try {
-    const current = await window.electronAPI.getSettings()
-    await window.electronAPI.saveSettings({ ...current, output_dir: dir })
+    await window.electronAPI.saveSettings({ output_dir: dir })
   } catch (e) { /* ignore */ }
 }
 
@@ -362,8 +361,7 @@ watch(platform, async (value) => {
   cookie.value = cookieByPlatform.value[cookieKeyFor(value)] || ''
   if (!settingsReady.value || !window.electronAPI) return
   try {
-    const current = await window.electronAPI.getSettings()
-    await window.electronAPI.saveSettings({ ...current, last_platform: value })
+    await window.electronAPI.saveSettings({ last_platform: value })
   } catch (e) { /* ignore */ }
 })
 

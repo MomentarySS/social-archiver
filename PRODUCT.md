@@ -31,7 +31,8 @@ Confirmed now:
 
 - Platforms in use: Weibo, X, and Instagram. All three have been cached and browsed from real local archives on this machine.
 - Original posts only (no 转发 / retweets); text-only posts are first-class, not skipped.
-- Incremental writes into the existing user folder; media that already exists is skipped; metadata and `index.html` are refreshed.
+- Incremental writes into the existing user folder; media that already exists is skipped; Weibo update stops after a short streak of complete cached originals; Instagram and X use gallery-dl download archives so large accounts do not re-walk the whole timeline.
+- Settings lists saved platform and per-user cookies (masked), with re-login and clear. Browse-sidebar Update opens the in-app login window when a cookie is missing, same as the timeline Update button.
 - In-app browse mimics the source timeline (Weibo light, X dark, Instagram light). Offline HTML is written to the user folder after a successful cache and can be regenerated from Browse; each platform exports its own skin (Instagram uses IG Blue links and brand gradient cover, not the Weibo layout).
 - Browse tab includes a multi-user manager: list archived accounts, per-user cookies, batch update/delete, a serial batch download queue, and a stop control while the queue is running. Cache and browse both write `lastUpdate` on a successful run.
 - Global shortcuts `Ctrl+1/2/3` switch Cache / Browse / Settings tabs while the window is focused (they are not registered as OS-wide hotkeys).

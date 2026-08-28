@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import time
@@ -13,6 +14,7 @@ from backend.metadata import download_avatar, save_post_metadata, save_profile
 
 MAX_PAGES = 200
 REQUEST_SLEEP = 1.2
+EXISTING_STREAK_STOP = 5
 
 
 def download_weibo_media(
@@ -65,11 +67,15 @@ def download_weibo_media(
     total_skipped = 0
     total_posts = 0
     total_text = 0
+    skipped_existing = 0
     reached_start = False
+    reached_existing = False
     failed = False
     seen_ids = set()
+    existing_streak = 0
+    user_dir = os.path.join(output_dir, "weibo", str(user_id))
 
-    while page <= MAX_PAGES and not reached_start:
+    while page <= MAX_PAGES and not reached_start and not reached_existing:
         params = {
             "type": "uid",
             "value": str(user_id),
@@ -150,6 +156,18 @@ def download_weibo_media(
                     reached_start = True
                 continue
 
+            date_folder = _format_date(created_at)
+            if post_id and _archive_post_complete(user_dir, date_folder, post_id):
+                skipped_existing += 1
+                if not start_dt and not pinned:
+                    existing_streak += 1
+                    if existing_streak >= EXISTING_STREAK_STOP:
+                        reached_existing = True
+                        break
+                continue
+            if not pinned:
+                existing_streak = 0
+
             if mblog.get("isLongText") or int(mblog.get("textLength") or 0) > 140:
                 long_text = _fetch_long_text(post_id, headers)
                 if long_text:
@@ -170,7 +188,6 @@ def download_weibo_media(
                     "avatar": "_avatar.jpg" if os.path.exists(avatar_dest) else "",
                 })
 
-            date_folder = _format_date(created_at)
             media_items = _collect_media(mblog)
             if not media_items and not _plain_text(mblog.get("text") or ""):
                 continue
@@ -221,6 +238,10 @@ def download_weibo_media(
             yield {"type": "status", "msg": "已到达起始日期，停止翻页。"}
             break
 
+        if reached_existing:
+            yield {"type": "status", "msg": "已遇到连续已缓存帖子，停止翻页。"}
+            break
+
         if new_on_page == 0:
             yield {"type": "status", "msg": "没有更多内容了。"}
             break
@@ -241,9 +262,19 @@ def download_weibo_media(
     if failed:
         return
 
+    if page > MAX_PAGES and not reached_start and not reached_existing:
+        yield {
+            "type": "status",
+            "msg": (
+                f"已翻到 {MAX_PAGES} 页上限，更早的微博未拉到。"
+                "可设起始日期分段缓存，或以后再更新。"
+            ),
+        }
+
+    extra = f"，跳过已有 {skipped_existing} 条" if skipped_existing else ""
     yield {
         "type": "status",
-        "msg": f"完成：共缓存 {total_posts} 条原创微博（文字 {total_text}，媒体文件 {total_downloaded}）",
+        "msg": f"完成：共缓存 {total_posts} 条原创微博（文字 {total_text}，媒体文件 {total_downloaded}）{extra}",
     }
     yield {
         "type": "done",
@@ -252,6 +283,29 @@ def download_weibo_media(
         "posts": total_posts,
         "output_dir": os.path.join(output_dir, "weibo", user_id),
     }
+
+
+def _archive_post_complete(user_dir: str, date_folder: str, post_id: str) -> bool:
+    """True when this post's JSON exists and every media file on disk looks valid."""
+    if not post_id:
+        return False
+    meta_path = os.path.join(user_dir, "_posts", date_folder, f"{post_id}.json")
+    if not os.path.isfile(meta_path):
+        return False
+    try:
+        with open(meta_path, encoding="utf-8") as handle:
+            metadata = json.load(handle) or {}
+    except Exception:
+        return False
+    for item in metadata.get("pics") or []:
+        folder = item.get("date_folder") or date_folder
+        name = item.get("filename") or ""
+        if name and not _media_file_ok(os.path.join(user_dir, folder, name)):
+            return False
+        video_name = item.get("video_filename") or ""
+        if video_name and not _media_file_ok(os.path.join(user_dir, folder, video_name)):
+            return False
+    return True
 
 
 def _iter_mblog_cards(cards: List[Dict]) -> List[Dict]:

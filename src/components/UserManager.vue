@@ -40,6 +40,23 @@
           {{ addFormValid ? '✓ Cookie 格式正确' : '✗ 缺少必需字段' }}
         </span>
       </div>
+      <div class="um-form-row">
+        <input
+          v-model="addForm.startDate"
+          class="um-input"
+          type="date"
+          :max="addForm.endDate || undefined"
+          aria-label="起始日期"
+        />
+        <input
+          v-model="addForm.endDate"
+          class="um-input"
+          type="date"
+          :min="addForm.startDate || undefined"
+          aria-label="结束日期"
+        />
+      </div>
+      <p class="um-date-hint">日期可选。留空则拉该用户全部原创。</p>
       <div class="um-form-row um-form-actions">
         <button class="primary-btn" type="button" :disabled="!addFormValid" @click="submitAddUser">
           开始缓存
@@ -196,14 +213,14 @@ const emit = defineEmits<{
   (e: 'delete-user', user: UserEntry): void
   (e: 'batch-update', users: UserEntry[]): void
   (e: 'batch-delete', paths: string[]): void
-  (e: 'add-user', data: { platform: string; userId: string; cookie: string }): void
+  (e: 'add-user', data: { platform: string; userId: string; cookie: string; startDate?: string; endDate?: string }): void
   (e: 'stop-batch'): void
 }>()
 
 // ─── State ────────────────────────────────────────────────────────
 const checkedUsers = ref(new Set<string>())
 const showAddForm = ref(false)
-const addForm = ref({ platform: 'twitter', userId: '', cookie: '' })
+const addForm = ref({ platform: 'twitter', userId: '', cookie: '', startDate: '', endDate: '' })
 const deleteTarget = ref<UserEntry | null>(null)
 
 // ─── Computed ───────────────────────────────────────────────────
@@ -307,8 +324,10 @@ function submitAddUser() {
     platform: addForm.value.platform,
     userId: addForm.value.userId.trim(),
     cookie: addForm.value.cookie.trim(),
+    startDate: addForm.value.startDate || undefined,
+    endDate: addForm.value.endDate || undefined,
   })
-  addForm.value = { platform: 'twitter', userId: '', cookie: '' }
+  addForm.value = { platform: 'twitter', userId: '', cookie: '', startDate: '', endDate: '' }
   showAddForm.value = false
 }
 
@@ -416,6 +435,12 @@ watch(() => props.users, () => {
 
 .cookie-hint.ok { color: #52c41a; }
 .cookie-hint.miss { color: #ff4d4f; }
+
+.um-date-hint {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--sa-muted);
+}
 
 .um-form-actions {
   justify-content: flex-end;
