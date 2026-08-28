@@ -53,7 +53,7 @@ Not this product:
 
 ## Brand Commitments
 
-Product name is **Social Archiver** / **社交存档**. The installer, window title, and in-app lockup use this. Do not revive the old “Media Harvester” string. Voice is direct Chinese for an operator sitting at the machine; no marketing English unless the user adds it.
+Product name is **Social Archiver** / **社交存档**. The installer, window title, and in-app lockup use this. Do not revive the old “Media Harvester” string. The Windows taskbar / exe icon is a rounded charcoal square with layered saffron / sky / magenta cards (see `DESIGN.md` App icon); it is not a platform logo collage. Voice is direct Chinese for an operator sitting at the machine; no marketing English unless the user adds it.
 
 ## Evidence on Hand
 

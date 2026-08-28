@@ -31,7 +31,7 @@ npm.cmd run electron:build
 
 产物：
 
-- `dist-electron\SocialArchiver-0.5.2-win.zip` — 解压后运行 `Social Archiver.exe`
+- `dist-electron\SocialArchiver-0.5.3-win.zip` — 解压后运行 `Social Archiver.exe`
 - `dist-electron\win-unpacked\` — 同上，开发机可直接跑这一份，不必每次解压 zip
 
 **不要只拷贝 exe**：必须保留整个 `win-unpacked` 目录（含 `resources\backend\backend.exe` 和 `_internal`）。打包版缓存日志已是 UTF-8 中文，不再乱码。
