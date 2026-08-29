@@ -1,6 +1,6 @@
 <template>
-  <div ref="root" class="lazy-post">
-    <PostCard v-if="shown" :post="post" />
+  <div ref="root" class="lazy-post" :id="anchorId || undefined">
+    <PostCard v-if="shown" :post="post" :highlight-query="highlightQuery" />
     <div v-else class="lazy-post-slot" aria-hidden="true"></div>
   </div>
 </template>
@@ -12,6 +12,8 @@ import type { Post } from '../electron-api.d.ts'
 
 defineProps<{
   post: Post
+  anchorId?: string
+  highlightQuery?: string
 }>()
 
 const root = ref<HTMLElement | null>(null)

@@ -57,6 +57,46 @@
         />
       </div>
       <p class="um-date-hint">日期可选。留空则拉该用户全部原创。</p>
+      <label v-if="addForm.platform === 'weibo'" class="um-deep-check">
+        <input type="checkbox" v-model="addForm.deepBacktrack" />
+        <span>深度回溯</span>
+      </label>
+      <label v-if="addForm.platform === 'weibo'" class="um-deep-check">
+        <input type="checkbox" v-model="addForm.includeQuoted" />
+        <span>收录带评论转发</span>
+      </label>
+      <template v-if="addForm.platform === 'twitter'">
+        <label class="um-deep-check">
+          <input type="checkbox" v-model="addForm.includeReplies" />
+          <span>同时缓存回复时间线</span>
+        </label>
+        <label v-if="addForm.includeReplies" class="um-deep-check um-deep-check-sub">
+          <input type="checkbox" v-model="addForm.repliesMediaOnly" />
+          <span>回复仅保留带媒体</span>
+        </label>
+        <label class="um-deep-check">
+          <input type="checkbox" v-model="addForm.includeQuotes" />
+          <span>同时缓存引用帖</span>
+        </label>
+        <label class="um-deep-check">
+          <input type="checkbox" v-model="addForm.includeBookmarks" />
+          <span>同时缓存书签（--bookmarks）</span>
+        </label>
+        <label class="um-deep-check">
+          <input type="checkbox" v-model="addForm.includeLikes" />
+          <span>同时缓存点赞（--likes）</span>
+        </label>
+      </template>
+      <template v-if="addForm.platform === 'instagram'">
+        <label class="um-deep-check">
+          <input type="checkbox" v-model="addForm.includeReels" />
+          <span>同时缓存 Reels</span>
+        </label>
+        <label class="um-deep-check">
+          <input type="checkbox" v-model="addForm.includeStories" />
+          <span>同时缓存 Stories（约 24h 时效）</span>
+        </label>
+      </template>
       <div class="um-form-row um-form-actions">
         <button class="primary-btn" type="button" :disabled="!addFormValid" @click="submitAddUser">
           开始缓存
@@ -100,9 +140,6 @@
           <span class="um-id">@{{ user.name }}</span>
         </div>
 
-        <!-- Last update -->
-        <span class="um-time">{{ formatLastUpdate(user.lastUpdate) }}</span>
-
         <!-- Per-user actions -->
         <div class="um-item-actions" @click.stop>
           <button
@@ -123,6 +160,21 @@
           >
             删除
           </button>
+        </div>
+
+        <div class="um-item-meta">
+          <select
+            class="um-schedule"
+            :value="scheduleFor(user)"
+            :disabled="batchRunning"
+            @click.stop
+            @change="onScheduleChange(user, $event)"
+          >
+            <option value="manual">手动</option>
+            <option value="daily">每日</option>
+            <option value="weekly">每周</option>
+          </select>
+          <span class="um-time">{{ formatLastUpdate(user.lastUpdate) }}</span>
         </div>
       </div>
     </div>
@@ -205,6 +257,7 @@ const props = defineProps<{
   batchRunning: boolean
   batchCompleted: number   // how many done in current batch
   batchTotal: number       // total in current batch
+  userSchedules?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -213,14 +266,15 @@ const emit = defineEmits<{
   (e: 'delete-user', user: UserEntry): void
   (e: 'batch-update', users: UserEntry[]): void
   (e: 'batch-delete', paths: string[]): void
-  (e: 'add-user', data: { platform: string; userId: string; cookie: string; startDate?: string; endDate?: string }): void
+  (e: 'add-user', data: { platform: string; userId: string; cookie: string; startDate?: string; endDate?: string; deepBacktrack?: boolean; includeReplies?: boolean; repliesMediaOnly?: boolean; includeQuotes?: boolean; includeBookmarks?: boolean; includeLikes?: boolean; includeQuoted?: boolean; includeReels?: boolean; includeStories?: boolean }): void
   (e: 'stop-batch'): void
+  (e: 'update-schedule', data: { platform: string; userId: string; schedule: string }): void
 }>()
 
 // ─── State ────────────────────────────────────────────────────────
 const checkedUsers = ref(new Set<string>())
 const showAddForm = ref(false)
-const addForm = ref({ platform: 'twitter', userId: '', cookie: '', startDate: '', endDate: '' })
+const addForm = ref({ platform: 'twitter', userId: '', cookie: '', startDate: '', endDate: '', deepBacktrack: false, includeReplies: false, repliesMediaOnly: false, includeQuotes: false, includeBookmarks: false, includeLikes: false, includeQuoted: false, includeReels: false, includeStories: false })
 const deleteTarget = ref<UserEntry | null>(null)
 
 // ─── Computed ───────────────────────────────────────────────────
@@ -291,8 +345,23 @@ function formatLastUpdate(ts?: string) {
   return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
 }
 
+function scheduleFor(user: UserEntry) {
+  const platform = user.platform || 'weibo'
+  const key = `${platform}:${user.name}`
+  return props.userSchedules?.[key] || 'manual'
+}
+
+function onScheduleChange(user: UserEntry, event: Event) {
+  const target = event.target as HTMLSelectElement
+  emit('update-schedule', {
+    platform: user.platform || 'weibo',
+    userId: user.name,
+    schedule: target.value,
+  })
+}
+
 function handleItemClick(path: string, event: MouseEvent) {
-  if ((event.target as HTMLElement).closest('.um-item-actions, .um-check, button')) return
+  if ((event.target as HTMLElement).closest('.um-item-actions, .um-item-meta, .um-check, button, select')) return
   emit('select-user', path)
 }
 
@@ -319,8 +388,17 @@ function submitAddUser() {
     cookie: addForm.value.cookie.trim(),
     startDate: addForm.value.startDate || undefined,
     endDate: addForm.value.endDate || undefined,
+    deepBacktrack: addForm.value.platform === 'weibo' ? addForm.value.deepBacktrack : false,
+    includeReplies: addForm.value.platform === 'twitter' ? addForm.value.includeReplies : false,
+    repliesMediaOnly: addForm.value.platform === 'twitter' ? addForm.value.repliesMediaOnly : false,
+    includeQuotes: addForm.value.platform === 'twitter' ? addForm.value.includeQuotes : false,
+    includeBookmarks: addForm.value.platform === 'twitter' ? addForm.value.includeBookmarks : false,
+    includeLikes: addForm.value.platform === 'twitter' ? addForm.value.includeLikes : false,
+    includeQuoted: addForm.value.platform === 'weibo' ? addForm.value.includeQuoted : false,
+    includeReels: addForm.value.platform === 'instagram' ? addForm.value.includeReels : false,
+    includeStories: addForm.value.platform === 'instagram' ? addForm.value.includeStories : false,
   })
-  addForm.value = { platform: 'twitter', userId: '', cookie: '', startDate: '', endDate: '' }
+  addForm.value = { platform: 'twitter', userId: '', cookie: '', startDate: '', endDate: '', deepBacktrack: false, includeReplies: false, repliesMediaOnly: false, includeQuotes: false, includeBookmarks: false, includeLikes: false, includeQuoted: false, includeReels: false, includeStories: false }
   showAddForm.value = false
 }
 
@@ -435,6 +513,19 @@ watch(() => props.users, () => {
   color: var(--sa-muted);
 }
 
+.um-deep-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--sa-muted);
+}
+
+.um-deep-check-sub {
+  margin-left: 18px;
+}
+
 .um-form-actions {
   justify-content: flex-end;
 }
@@ -443,6 +534,7 @@ watch(() => props.users, () => {
 .um-list {
   max-height: 320px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .um-empty {
@@ -453,13 +545,17 @@ watch(() => props.users, () => {
 }
 
 .um-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: 16px auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "check plat info actions"
+    ". meta meta meta";
+  column-gap: 8px;
+  row-gap: 6px;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--sa-edge);
   cursor: pointer;
-  min-height: 48px;
 }
 
 .um-item:last-child {
@@ -475,6 +571,7 @@ watch(() => props.users, () => {
 }
 
 .um-check {
+  grid-area: check;
   width: 16px;
   height: 16px;
   flex-shrink: 0;
@@ -482,6 +579,7 @@ watch(() => props.users, () => {
 }
 
 .um-platform {
+  grid-area: plat;
   font-size: 11px;
   font-weight: 700;
   padding: 2px 6px;
@@ -495,7 +593,7 @@ watch(() => props.users, () => {
 .plat-unknown { background: var(--sa-muted); color: #fff; }
 
 .um-user-info {
-  flex: 1;
+  grid-area: info;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -514,16 +612,42 @@ watch(() => props.users, () => {
 .um-id {
   font-size: 11px;
   color: var(--sa-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.um-item-meta {
+  grid-area: meta;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .um-time {
   font-size: 11px;
   color: var(--sa-muted);
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.um-schedule {
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--sa-edge);
+  background: var(--sa-surface);
+  color: var(--sa-ink);
+  font-size: 11px;
+  padding: 0 8px;
+  flex-shrink: 0;
 }
 
 .um-item-actions {
+  grid-area: actions;
   display: flex;
   gap: 4px;
   flex-shrink: 0;

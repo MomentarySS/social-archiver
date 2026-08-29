@@ -1,0 +1,17 @@
+{
+  "output_dir": "D:/archives",
+  "concurrent": 3,
+  "naming_template": "{post_id}_{index}",
+  "jobs": [
+    {
+      "platform": "weibo",
+      "user_id": "1195230310",
+      "cookie_file": "cookies/weibo.txt"
+    },
+    {
+      "platform": "twitter",
+      "user_id": "amd",
+      "cookie_file": "cookies/x.txt"
+    }
+  ]
+}

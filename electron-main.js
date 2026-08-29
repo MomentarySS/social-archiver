@@ -1,16 +1,33 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, session, Notification } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const { Readable } = require('stream');
 const { createJsonLineParser } = require('./json-lines');
 const { applySettingsPatch } = require('./settings-merge');
+const { searchArchives, buildSearchIndex } = require('./electron-search');
+const {
+  getDataDir,
+  getSettingsPath,
+  isPortableMode,
+  getDefaultOutputDir,
+  getCookieTmpDir,
+} = require('./app-paths');
+const { collectUserStats, collectArchiveStats } = require('./electron-stats');
+const { exportUserMarkdown } = require('./electron-export-md');
+const { exportUserRss } = require('./electron-rss');
+const { exportUserJson } = require('./electron-export-json');
+const { appendUpdateLog } = require('./electron-update-log');
+const { createScheduler, userScheduleKey, isUserDue } = require('./electron-scheduler');
+
+function getDebugLogPath() {
+  return path.join(getDataDir(), 'weibo-login-debug.log');
+}
 
 // ========== Debug Logging ==========
-const debugLogPath = path.join(app.getPath('userData'), 'weibo-login-debug.log');
 function debugLog(msg) {
   try {
-    fs.appendFileSync(debugLogPath, new Date().toISOString() + ' ' + msg + '\n');
+    fs.appendFileSync(getDebugLogPath(), new Date().toISOString() + ' ' + msg + '\n');
   } catch (e) { /* ignore */ }
 }
 
@@ -66,6 +83,53 @@ let currentBatchJob = null;      // { platform, userId, cookie, outputDir, concu
 let batchProcess = null;         // active subprocess for the current batch job
 let isBatchRunning = false;
 let batchStopRequested = false;
+let schedulerController = null;
+const assetRoots = new Set();
+let settingsWrite = Promise.resolve();
+
+function rememberAssetRoot(dir) {
+  if (!dir) return;
+  try {
+    assetRoots.add(path.resolve(dir));
+  } catch (_) { /* ignore */ }
+}
+
+function readSettings() {
+  try {
+    const configPath = getSettingsPath();
+    if (fs.existsSync(configPath)) {
+      const settings = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (isPortableMode() && !settings.output_dir) {
+        settings.output_dir = getDefaultOutputDir();
+      }
+      return settings;
+    }
+  } catch (e) {
+    console.error('加载设置失败:', e);
+  }
+  const defaults = {};
+  if (isPortableMode()) {
+    defaults.output_dir = getDefaultOutputDir();
+  }
+  return defaults;
+}
+
+function writeSettingsFile(settings) {
+  const configPath = getSettingsPath();
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify(settings, null, 2), 'utf-8');
+}
+
+async function saveSettingsPatch(patch) {
+  const run = settingsWrite.then(() => {
+    const next = applySettingsPatch(readSettings(), patch);
+    writeSettingsFile(next);
+    if (next.output_dir) rememberAssetRoot(next.output_dir);
+    return next;
+  });
+  settingsWrite = run.then(() => {}, () => {});
+  return run;
+}
 
 function mimeForAsset(filePath) {
   const ext = path.extname(filePath || '').toLowerCase();
@@ -219,6 +283,14 @@ app.whenReady().then(() => {
   debugLog('App ready, creating main window');
   const startupSettings = readSettings();
   if (startupSettings.output_dir) rememberAssetRoot(startupSettings.output_dir);
+  schedulerController = createScheduler({
+    readSettings,
+    saveSettingsPatch,
+    buildScheduledJobs,
+    enqueueBatchDownload: enqueueBatchDownloadInternal,
+    isDownloading: async () => downloadProcess !== null || isBatchRunning,
+  });
+  schedulerController.start();
   createWindow();
 });
 
@@ -234,6 +306,7 @@ app.on('before-quit', () => {
 });
 
 app.on('will-quit', () => {
+  schedulerController?.stop();
   debugLog('Will quit');
 });
 
@@ -244,28 +317,6 @@ app.on('activate', () => {
 });
 
 // Download IPC
-
-function readSettings() {
-  try {
-    const configPath = path.join(app.getPath('userData'), 'settings.json');
-    if (fs.existsSync(configPath)) {
-      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    }
-  } catch (e) {
-    console.error('加载设置失败:', e);
-  }
-  return {};
-}
-
-const assetRoots = new Set();
-let settingsWrite = Promise.resolve();
-
-function rememberAssetRoot(dir) {
-  if (!dir) return;
-  try {
-    assetRoots.add(path.resolve(dir));
-  } catch (_) { /* ignore */ }
-}
 
 function isAssetAllowed(filePath) {
   if (!filePath) return false;
@@ -283,8 +334,7 @@ function isAssetAllowed(filePath) {
 }
 
 function writeCookieFile(cookie) {
-  const dir = path.join(app.getPath('userData'), 'cookie-tmp');
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = getCookieTmpDir();
   const file = path.join(dir, `c-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
   fs.writeFileSync(file, cookie || '', { encoding: 'utf8', mode: 0o600 });
   return file;
@@ -293,6 +343,103 @@ function writeCookieFile(cookie) {
 function removeCookieFile(file) {
   if (!file) return;
   try { fs.unlinkSync(file); } catch (_) { /* ignore */ }
+}
+
+function h264SiblingPath(mediaPath) {
+  if (!mediaPath) return '';
+  const ext = path.extname(mediaPath);
+  const candidate = path.join(path.dirname(mediaPath), `${path.basename(mediaPath, ext)}_h264.mp4`);
+  try {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).size > 64) return candidate;
+  } catch (_) { /* ignore */ }
+  return '';
+}
+
+function mapPostMediaPaths(userDir, pic) {
+  const baseDir = pic.date_folder || '';
+  const absPath = path.join(userDir, baseDir, pic.filename || '');
+  const videoAbsPath = pic.video_filename
+    ? path.join(userDir, baseDir, pic.video_filename)
+    : '';
+  const playbackAbsPath = pic.playback_filename
+    ? path.join(userDir, baseDir, pic.playback_filename)
+    : (pic.type === 'video' ? h264SiblingPath(absPath) : '');
+  const videoPlaybackAbsPath = pic.video_playback_filename
+    ? path.join(userDir, baseDir, pic.video_playback_filename)
+    : (videoAbsPath ? h264SiblingPath(videoAbsPath) : '');
+  const posterAbsPath = pic.poster_filename
+    ? path.join(userDir, baseDir, pic.poster_filename)
+    : '';
+  return {
+    ...pic,
+    abs_path: absPath,
+    video_abs_path: videoAbsPath,
+    playback_abs_path: playbackAbsPath,
+    video_playback_abs_path: videoPlaybackAbsPath,
+    poster_abs_path: posterAbsPath,
+  };
+}
+
+function isTwitterDerivativeUser(name) {
+  return String(name || '').endsWith('--bookmarks') || String(name || '').endsWith('--likes');
+}
+
+function twitterDisplayName(ud, profile) {
+  const platform = profile.platform || ud.platform || '';
+  const base = profile.baseUserId || ud.name.replace(/--bookmarks$|--likes$/, '');
+  if (ud.name.endsWith('--bookmarks')) {
+    return platform ? `${platform} / ${base} (书签)` : `${base} (书签)`;
+  }
+  if (ud.name.endsWith('--likes')) {
+    return platform ? `${platform} / ${base} (点赞)` : `${base} (点赞)`;
+  }
+  return platform
+    ? `${platform} / ${profile.name || profile.screen_name || ud.name}`
+    : (profile.name || profile.screen_name || ud.name);
+}
+
+function readTwitterFetchOptions(outputDir, userId) {
+  try {
+    const profilePath = path.join(outputDir, 'twitter', userId, '_profile.json');
+    if (!fs.existsSync(profilePath)) return {};
+    const profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    return {
+      includeReplies: Boolean(profile.includeReplies),
+      repliesMediaOnly: Boolean(profile.repliesMediaOnly),
+      includeQuotes: Boolean(profile.includeQuotes),
+      includeBookmarks: Boolean(profile.includeBookmarks),
+      includeLikes: Boolean(profile.includeLikes),
+    };
+  } catch (_) {
+    return {};
+  }
+}
+
+function readWeiboFetchOptions(outputDir, userId) {
+  try {
+    const profilePath = path.join(outputDir, 'weibo', userId, '_profile.json');
+    if (!fs.existsSync(profilePath)) return {};
+    const profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    return {
+      includeQuoted: Boolean(profile.includeQuoted),
+    };
+  } catch (_) {
+    return {};
+  }
+}
+
+function readInstagramFetchOptions(outputDir, userId) {
+  try {
+    const profilePath = path.join(outputDir, 'instagram', userId, '_profile.json');
+    if (!fs.existsSync(profilePath)) return {};
+    const profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    return {
+      includeReels: Boolean(profile.includeReels),
+      includeStories: Boolean(profile.includeStories),
+    };
+  } catch (_) {
+    return {};
+  }
 }
 
 function spawnBackendJob(job) {
@@ -310,6 +457,39 @@ function spawnBackendJob(job) {
   ];
   if (job.startDate) args.push('--start-date', job.startDate);
   if (job.endDate) args.push('--end-date', job.endDate);
+  if (job.deepBacktrack) args.push('--deep-backtrack');
+  if (job.platform === 'twitter') {
+    const twitterOpts = job.includeReplies !== undefined
+      ? {
+        includeReplies: Boolean(job.includeReplies),
+        repliesMediaOnly: Boolean(job.repliesMediaOnly),
+        includeQuotes: Boolean(job.includeQuotes),
+        includeBookmarks: Boolean(job.includeBookmarks),
+        includeLikes: Boolean(job.includeLikes),
+      }
+      : readTwitterFetchOptions(job.outputDir, job.userId);
+    if (twitterOpts.includeReplies) args.push('--include-replies');
+    if (twitterOpts.repliesMediaOnly) args.push('--replies-media-only');
+    if (twitterOpts.includeQuotes) args.push('--include-quotes');
+    if (twitterOpts.includeBookmarks) args.push('--include-bookmarks');
+    if (twitterOpts.includeLikes) args.push('--include-likes');
+  }
+  if (job.platform === 'weibo') {
+    const weiboOpts = job.includeQuoted !== undefined
+      ? { includeQuoted: Boolean(job.includeQuoted) }
+      : readWeiboFetchOptions(job.outputDir, job.userId);
+    if (weiboOpts.includeQuoted) args.push('--include-quoted');
+  }
+  if (job.platform === 'instagram') {
+    const igOpts = job.includeReels !== undefined || job.includeStories !== undefined
+      ? {
+        includeReels: Boolean(job.includeReels),
+        includeStories: Boolean(job.includeStories),
+      }
+      : readInstagramFetchOptions(job.outputDir, job.userId);
+    if (igOpts.includeReels) args.push('--include-reels');
+    if (igOpts.includeStories) args.push('--include-stories');
+  }
   rememberAssetRoot(job.outputDir);
   const proc = spawn(backendInfo.program, args, {
     cwd: backendInfo.cwd,
@@ -340,6 +520,7 @@ function processQueue() {
     currentBatchJob = null;
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('batch:done', { type: 'batch-done' });
+      notifyDesktop('Social Archiver', '批量缓存已全部完成');
     }
     return;
   }
@@ -379,6 +560,14 @@ function processQueue() {
       if (evt.type === 'done') {
         evt.userDir = path.join(job.outputDir, job.platform, job.userId);
         updateProfileLastUpdate(evt.userDir);
+        logUpdate(job.outputDir, {
+          platform: job.platform,
+          userId: job.userId,
+          success: true,
+          posts: evt.posts,
+          count: evt.count,
+          batch: true,
+        });
       }
       mainWindow?.webContents.send('batch:event', { ...evt, userId: job.userId, platform: job.platform });
     },
@@ -416,6 +605,13 @@ function processQueue() {
       return;
     }
     if (code !== 0) {
+      logUpdate(job.outputDir, {
+        platform: job.platform,
+        userId: job.userId,
+        success: false,
+        error: `exit ${code}`,
+        batch: true,
+      });
       mainWindow?.webContents.send('batch:event', {
         type: 'user-error',
         userId: job.userId,
@@ -449,6 +645,28 @@ function updateProfileLastUpdate(userDir) {
     profile.lastUpdate = new Date().toISOString();
     fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2), 'utf8');
   } catch (_) {}
+}
+
+function notificationsEnabled() {
+  try {
+    const settings = readSettings();
+    return settings.notifications?.enabled !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
+function notifyDesktop(title, body) {
+  if (!notificationsEnabled()) return;
+  if (!Notification.isSupported()) return;
+  try {
+    new Notification({ title, body }).show();
+  } catch (_) { /* ignore */ }
+}
+
+function logUpdate(outputDir, entry) {
+  if (!outputDir) return;
+  appendUpdateLog(outputDir, entry);
 }
 
 ipcMain.handle('enqueue-batch-download', async (event, jobs) => {
@@ -489,9 +707,46 @@ ipcMain.handle('get-batch-status', async () => {
   };
 });
 
+function runBackendJsonLines(extraArgs, { cookie } = {}) {
+  return new Promise((resolve, reject) => {
+    const backendInfo = resolveBackendPath();
+    const cookieFile = cookie != null ? writeCookieFile(cookie) : '';
+    const args = [...backendInfo.args, ...extraArgs];
+    if (cookieFile) args.push('--cookie-file', cookieFile);
+    const proc = spawn(backendInfo.program, args, {
+      cwd: backendInfo.cwd,
+      windowsHide: true,
+      env: backendInfo.env,
+    });
+    const events = [];
+    const parser = createJsonLineParser(
+      (parsed) => events.push(parsed),
+      () => {},
+    );
+    proc.stdout.on('data', (data) => parser.push(data));
+    proc.stderr.on('data', (data) => {
+      const msg = data.toString('utf8').trim();
+      if (msg) events.push({ type: 'status', msg });
+    });
+    proc.on('error', (err) => {
+      if (cookieFile) removeCookieFile(cookieFile);
+      reject(err);
+    });
+    proc.on('close', (code) => {
+      parser.flush();
+      if (cookieFile) removeCookieFile(cookieFile);
+      if (code !== 0 && !events.some((e) => e.type === 'cookie-check' || e.type === 'summary' || e.type === 'error' || e.type === 'ffmpeg-probe')) {
+        reject(new Error(`后端进程退出（代码 ${code}）`));
+        return;
+      }
+      resolve(events);
+    });
+  });
+}
+
 // ─── Single-user download (existing) ───────────────────────────────
 
-ipcMain.handle('start-download', async (event, { platform, userId, cookie, outputDir, startDate, endDate, concurrent, namingTemplate }) => {
+ipcMain.handle('start-download', async (event, { platform, userId, cookie, outputDir, startDate, endDate, concurrent, namingTemplate, deepBacktrack, includeReplies, repliesMediaOnly, includeQuotes, includeQuoted, includeReels, includeStories, includeBookmarks, includeLikes }) => {
   if (downloadProcess) {
     return { success: false, error: '已有缓存任务进行中' };
   }
@@ -506,6 +761,15 @@ ipcMain.handle('start-download', async (event, { platform, userId, cookie, outpu
       endDate,
       concurrent,
       namingTemplate,
+      deepBacktrack: Boolean(deepBacktrack),
+      includeReplies: platform === 'twitter' ? Boolean(includeReplies) : false,
+      repliesMediaOnly: platform === 'twitter' ? Boolean(repliesMediaOnly) : false,
+      includeQuotes: platform === 'twitter' ? Boolean(includeQuotes) : false,
+      includeBookmarks: platform === 'twitter' ? Boolean(includeBookmarks) : false,
+      includeLikes: platform === 'twitter' ? Boolean(includeLikes) : false,
+      includeQuoted: platform === 'weibo' ? Boolean(includeQuoted) : false,
+      includeReels: platform === 'instagram' ? Boolean(includeReels) : false,
+      includeStories: platform === 'instagram' ? Boolean(includeStories) : false,
     });
 
     const parser = createJsonLineParser(
@@ -513,6 +777,14 @@ ipcMain.handle('start-download', async (event, { platform, userId, cookie, outpu
         if (parsed.type === 'done') {
           parsed.userDir = path.join(outputDir, platform, userId);
           updateProfileLastUpdate(parsed.userDir);
+          logUpdate(outputDir, {
+            platform,
+            userId,
+            success: true,
+            posts: parsed.posts,
+            count: parsed.count,
+          });
+          notifyDesktop('Social Archiver', `已缓存 ${platform}/${userId}：${parsed.posts || 0} 篇`);
         }
         mainWindow?.webContents.send('download:event', parsed);
       },
@@ -621,15 +893,285 @@ ipcMain.handle('get-settings', async () => {
 });
 
 ipcMain.handle('save-settings', async (event, settings) => {
-  const run = settingsWrite.then(() => {
-    const configPath = path.join(app.getPath('userData'), 'settings.json');
-    const next = applySettingsPatch(readSettings(), settings);
-    fs.writeFileSync(configPath, JSON.stringify(next, null, 2), 'utf-8');
-    if (next.output_dir) rememberAssetRoot(next.output_dir);
+  try {
+    await saveSettingsPatch(settings);
+    if (settings?.scheduler) {
+      schedulerController?.start();
+    }
     return { success: true };
-  }).catch((e) => ({ success: false, error: e.message }));
-  settingsWrite = run.then(() => {}, () => {});
-  return run;
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('search-archives', async (event, { outputDir, query, rebuild }) => {
+  try {
+    if (!outputDir) return { hits: [], total: 0, error: '未选择存档目录' };
+    rememberAssetRoot(outputDir);
+    return searchArchives(outputDir, query, { rebuild: Boolean(rebuild) });
+  } catch (e) {
+    return { hits: [], total: 0, error: e.message };
+  }
+});
+
+ipcMain.handle('rebuild-search-index', async (event, outputDir) => {
+  try {
+    if (!outputDir) return { success: false, error: '未选择存档目录' };
+    rememberAssetRoot(outputDir);
+    const index = buildSearchIndex(outputDir);
+    return { success: true, count: index.entries.length };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('verify-archives', async (event, { outputDir, platform, userId }) => {
+  try {
+    if (!outputDir) return { success: false, error: '未选择存档目录', issues: [] };
+    rememberAssetRoot(outputDir);
+    const args = ['--verify', '--output-dir', outputDir];
+    if (platform) args.push('--platform', platform);
+    if (userId) args.push('--user-id', userId);
+    const events = await runBackendJsonLines(args);
+    const issues = events.filter((e) => e.type === 'missing_media' || e.type === 'corrupt_media' || e.type === 'bad_json');
+    const summaries = events.filter((e) => e.type === 'summary');
+    const errors = events.filter((e) => e.type === 'error');
+    if (errors.length) {
+      return { success: false, error: errors[0].msg, issues, summaries };
+    }
+    return { success: true, issues, summaries, events };
+  } catch (e) {
+    return { success: false, error: e.message, issues: [] };
+  }
+});
+
+ipcMain.handle('probe-ffmpeg', async () => {
+  try {
+    const events = await runBackendJsonLines(['--probe-ffmpeg']);
+    const result = events.find((e) => e.type === 'ffmpeg-probe');
+    if (!result) {
+      const err = events.find((e) => e.type === 'error');
+      return { available: false, path: '', version: '', error: err?.msg || '检测失败' };
+    }
+    return result;
+  } catch (e) {
+    return { available: false, path: '', version: '', error: e.message };
+  }
+});
+
+ipcMain.handle('transcode-archives', async (event, { outputDir, platform, userId }) => {
+  try {
+    if (!outputDir) return { success: false, error: '未选择存档目录', summaries: [] };
+    rememberAssetRoot(outputDir);
+    const args = ['--transcode', '--output-dir', outputDir];
+    if (platform) args.push('--platform', platform);
+    if (userId) args.push('--user-id', userId);
+    const events = await runBackendJsonLines(args);
+    const summaries = events.filter((e) => e.type === 'summary');
+    const errors = events.filter((e) => e.type === 'error');
+    if (errors.length) {
+      return { success: false, error: errors[0].msg, summaries, events };
+    }
+    const failed = summaries.some((item) => item.ok === false);
+    return { success: !failed, summaries, events };
+  } catch (e) {
+    return { success: false, error: e.message, summaries: [] };
+  }
+});
+
+ipcMain.handle('generate-posters', async (event, { outputDir, platform, userId }) => {
+  try {
+    if (!outputDir) return { success: false, error: '未选择存档目录', summaries: [] };
+    rememberAssetRoot(outputDir);
+    const args = ['--generate-posters', '--output-dir', outputDir];
+    if (platform) args.push('--platform', platform);
+    if (userId) args.push('--user-id', userId);
+    const events = await runBackendJsonLines(args);
+    const summaries = events.filter((e) => e.type === 'summary');
+    const errors = events.filter((e) => e.type === 'error');
+    if (errors.length) {
+      return { success: false, error: errors[0].msg, summaries, events };
+    }
+    const failed = summaries.some((item) => item.ok === false);
+    return { success: !failed, summaries, events };
+  } catch (e) {
+    return { success: false, error: e.message, summaries: [] };
+  }
+});
+
+ipcMain.handle('check-cookie', async (event, { platform, cookie }) => {
+  try {
+    const args = ['--check-cookie', '--platform', platform];
+    const events = await runBackendJsonLines(args, { cookie });
+    const result = events.find((e) => e.type === 'cookie-check');
+    if (!result) {
+      const err = events.find((e) => e.type === 'error');
+      return { valid: false, message: err?.msg || '预检失败' };
+    }
+    return { valid: Boolean(result.valid), message: result.message || '' };
+  } catch (e) {
+    return { valid: false, message: e.message };
+  }
+});
+
+function cookieForUser(settings, platform, userId) {
+  const key = `${platform}:${userId}`;
+  const perUser = settings?.cookies?.per_user || {};
+  return perUser[key] || settings?.cookies?.[platform] || '';
+}
+
+function hasUsableCookie(platform, cookie) {
+  const value = String(cookie || '').trim();
+  if (!value) return false;
+  if (platform === 'weibo') return value.includes('SUB=') || (!value.includes('=') && !value.includes(';'));
+  if (platform === 'twitter') return /auth_token=/i.test(value) && /ct0=/i.test(value);
+  if (platform === 'instagram') return /sessionid=/i.test(value) || (!value.includes('=') && !value.includes(';'));
+  return true;
+}
+
+async function buildScheduledJobs(settings) {
+  const outputDir = settings?.output_dir;
+  if (!outputDir || !fs.existsSync(outputDir)) return [];
+  const users = await scanArchivesInternal(outputDir);
+  const schedules = settings.user_schedules || {};
+  const lastScheduled = settings.user_last_scheduled || {};
+  const jobs = [];
+  for (const user of users) {
+    const platform = user.platform || 'weibo';
+    if (platform === 'twitter' && isTwitterDerivativeUser(user.name)) continue;
+    const key = userScheduleKey(platform, user.name);
+    const schedule = schedules[key] || 'manual';
+    if (!isUserDue(schedule, lastScheduled[key])) continue;
+    const cookie = cookieForUser(settings, platform, user.name);
+    if (!hasUsableCookie(platform, cookie)) continue;
+    jobs.push({
+      platform,
+      userId: user.name,
+      cookie,
+      outputDir,
+      concurrent: settings.concurrent || 3,
+      namingTemplate: settings.naming_template || '{post_id}_{index}',
+      ...readTwitterFetchOptions(outputDir, user.name),
+      ...readWeiboFetchOptions(outputDir, user.name),
+      ...readInstagramFetchOptions(outputDir, user.name),
+    });
+  }
+  return jobs;
+}
+
+async function scanArchivesInternal(outputDir) {
+  if (!outputDir || !fs.existsSync(outputDir)) return [];
+  const users = [];
+  const entries = fs.readdirSync(outputDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const platformDirs = ['weibo', 'twitter', 'instagram'];
+    const userDirs = platformDirs.includes(entry.name)
+      ? fs.readdirSync(path.join(outputDir, entry.name), { withFileTypes: true })
+          .filter((d) => d.isDirectory())
+          .map((d) => ({ name: d.name, dir: path.join(outputDir, entry.name, d.name), platform: entry.name }))
+      : [{ name: entry.name, dir: path.join(outputDir, entry.name), platform: '' }];
+    for (const ud of userDirs) {
+      if (!fs.existsSync(path.join(ud.dir, '_posts'))) continue;
+      users.push({ name: ud.name, path: ud.dir, platform: ud.platform });
+    }
+  }
+  return users;
+}
+
+async function enqueueBatchDownloadInternal(jobs) {
+  if (!Array.isArray(jobs) || jobs.length === 0) {
+    return { success: false, error: '没有要下载的用户', queued: 0 };
+  }
+  batchStopRequested = false;
+  for (const job of jobs) {
+    downloadQueue.push(job);
+  }
+  if (!isBatchRunning) {
+    processQueue();
+  }
+  return { success: true, queued: downloadQueue.length };
+}
+
+ipcMain.handle('get-portable-info', async () => ({
+  portable: isPortableMode(),
+  settingsPath: getSettingsPath(),
+  dataDir: getDataDir(),
+}));
+
+ipcMain.handle('get-user-stats', async (event, userDir) => {
+  try {
+    if (!userDir || !fs.existsSync(userDir)) return null;
+    rememberAssetRoot(userDir);
+    return collectUserStats(userDir);
+  } catch (_) {
+    return null;
+  }
+});
+
+ipcMain.handle('get-archive-stats', async (event, outputDir) => {
+  try {
+    if (!outputDir) return { users: [], totalPosts: 0, totalMedia: 0, totalBytes: 0, totalBytesLabel: '0 B' };
+    rememberAssetRoot(outputDir);
+    return collectArchiveStats(outputDir);
+  } catch (_) {
+    return { users: [], totalPosts: 0, totalMedia: 0, totalBytes: 0, totalBytesLabel: '0 B' };
+  }
+});
+
+ipcMain.handle('export-markdown', async (event, { userDir, destDir }) => {
+  try {
+    if (!userDir || !fs.existsSync(userDir)) {
+      return { success: false, error: '用户目录不存在' };
+    }
+    rememberAssetRoot(userDir);
+    return exportUserMarkdown(userDir, destDir || '');
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('export-rss', async (event, { userDir, destPath }) => {
+  try {
+    if (!userDir || !fs.existsSync(userDir)) {
+      return { success: false, error: '用户目录不存在' };
+    }
+    rememberAssetRoot(userDir);
+    return exportUserRss(userDir, destPath || '');
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('export-json', async (event, { userDir, destPath }) => {
+  try {
+    if (!userDir || !fs.existsSync(userDir)) {
+      return { success: false, error: '用户目录不存在' };
+    }
+    rememberAssetRoot(userDir);
+    return exportUserJson(userDir, destPath || '');
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('repair-weibo-media', async (event, { outputDir, platform, userId }) => {
+  try {
+    if (!outputDir) return { success: false, error: '未选择存档目录', events: [] };
+    rememberAssetRoot(outputDir);
+    const args = ['--repair-weibo-media', '--output-dir', outputDir];
+    if (platform) args.push('--platform', platform);
+    if (userId) args.push('--user-id', userId);
+    const events = await runBackendJsonLines(args);
+    const errors = events.filter((e) => e.type === 'error');
+    const summaries = events.filter((e) => e.type === 'summary');
+    if (errors.length) {
+      return { success: false, error: errors[0].msg, events, summaries };
+    }
+    return { success: true, events, summaries };
+  } catch (e) {
+    return { success: false, error: e.message, events: [], summaries: [] };
+  }
 });
 
 // Browse archive IPC
@@ -685,9 +1227,7 @@ ipcMain.handle('scan-archives', async (event, outputDir) => {
             }
           } catch (e) { /* ignore */ }
         }
-        const displayName = platform
-          ? `${platform} / ${profile.name || profile.screen_name || ud.name}`
-          : (profile.name || profile.screen_name || ud.name);
+        const displayName = twitterDisplayName(ud, profile);
         users.push({
           name: ud.name,
           path: userDir,
@@ -779,60 +1319,85 @@ function parseTimestamp(raw) {
   return 0;
 }
 
-ipcMain.handle('get-posts', async (event, userDir) => {
-  try {
-    if (!userDir || !fs.existsSync(userDir)) {
-      return [];
-    }
-    rememberAssetRoot(userDir);
-    const posts = [];
-    const postsRoot = path.join(userDir, '_posts');
-    if (!fs.existsSync(postsRoot)) return [];
+function loadPostsFromUserDir(userDir) {
+  if (!userDir || !fs.existsSync(userDir)) return [];
+  rememberAssetRoot(userDir);
+  const posts = [];
+  const postsRoot = path.join(userDir, '_posts');
+  if (!fs.existsSync(postsRoot)) return [];
 
-    let profile = {};
-    const profilePath = path.join(userDir, '_profile.json');
-    if (fs.existsSync(profilePath)) {
-      try { profile = JSON.parse(fs.readFileSync(profilePath, 'utf-8')) || {}; } catch (e) { /* ignore */ }
-    }
-    const avatarPath = findAvatar(userDir);
-    const hasAvatar = Boolean(avatarPath);
-    const fallbackId = path.basename(userDir);
+  let profile = {};
+  const profilePath = path.join(userDir, '_profile.json');
+  if (fs.existsSync(profilePath)) {
+    try { profile = JSON.parse(fs.readFileSync(profilePath, 'utf-8')) || {}; } catch (e) { /* ignore */ }
+  }
+  const avatarPath = findAvatar(userDir);
+  const hasAvatar = Boolean(avatarPath);
+  const fallbackId = path.basename(userDir);
 
-    const dates = fs.readdirSync(postsRoot, { withFileTypes: true })
-      .filter(d => d.isDirectory());
+  const dates = fs.readdirSync(postsRoot, { withFileTypes: true })
+    .filter((d) => d.isDirectory());
 
-    for (const dateEntry of dates) {
-      const dateDir = path.join(postsRoot, dateEntry.name);
-      const files = fs.readdirSync(dateDir).filter(f => f.endsWith('.json'));
-      for (const file of files) {
-        try {
-          const content = fs.readFileSync(path.join(dateDir, file), 'utf-8');
-          const meta = JSON.parse(content);
-          if (meta.pics && Array.isArray(meta.pics)) {
-            meta.pics = meta.pics.map(pic => ({
-              ...pic,
-              abs_path: path.join(userDir, pic.date_folder || '', pic.filename || ''),
-              video_abs_path: pic.video_filename
-                ? path.join(userDir, pic.date_folder || '', pic.video_filename)
-                : '',
-            }));
-          }
-          meta.user_name = meta.user_name || profile.name || profile.screen_name || fallbackId;
-          meta.screen_name = meta.screen_name || profile.screen_name || fallbackId;
-          if (profile.verified) meta.verified = true;
-          if (hasAvatar) meta.avatar_path = avatarPath;
-          posts.push(meta);
-        } catch (e) {
-          // skip unreadable metadata
+  for (const dateEntry of dates) {
+    const dateDir = path.join(postsRoot, dateEntry.name);
+    const files = fs.readdirSync(dateDir).filter((f) => f.endsWith('.json'));
+    for (const file of files) {
+      try {
+        const content = fs.readFileSync(path.join(dateDir, file), 'utf-8');
+        const meta = JSON.parse(content);
+        if (meta.pics && Array.isArray(meta.pics)) {
+          meta.pics = meta.pics.map((pic) => mapPostMediaPaths(userDir, pic));
         }
+        meta.user_name = meta.user_name || profile.name || profile.screen_name || fallbackId;
+        meta.screen_name = meta.screen_name || profile.screen_name || fallbackId;
+        if (profile.verified) meta.verified = true;
+        if (hasAvatar) meta.avatar_path = avatarPath;
+        meta._archiveUserDir = userDir;
+        meta._archiveUserLabel = profile.name || profile.screen_name || fallbackId;
+        posts.push(meta);
+      } catch (e) {
+        // skip unreadable metadata
       }
     }
-    posts.sort((a, b) => {
+  }
+  posts.sort((a, b) => {
+    const pinDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+    if (pinDiff) return pinDiff;
+    const diff = postTimeMs(b) - postTimeMs(a);
+    if (diff) return diff;
+    return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+  });
+  return posts;
+}
+
+ipcMain.handle('get-posts', async (event, userDir) => {
+  try {
+    return loadPostsFromUserDir(userDir);
+  } catch (e) {
+    return [];
+  }
+});
+
+ipcMain.handle('get-all-posts', async (event, outputDir) => {
+  try {
+    if (!outputDir || !fs.existsSync(outputDir)) return [];
+    rememberAssetRoot(outputDir);
+    const users = await scanArchivesInternal(outputDir);
+    const merged = [];
+    for (const user of users) {
+      const batch = loadPostsFromUserDir(user.path);
+      for (const post of batch) {
+        post._archiveUserDir = user.path;
+        post._archiveUserLabel = user.displayName || user.name;
+        merged.push(post);
+      }
+    }
+    merged.sort((a, b) => {
       const diff = postTimeMs(b) - postTimeMs(a);
       if (diff) return diff;
       return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
     });
-    return posts;
+    return merged;
   } catch (e) {
     return [];
   }

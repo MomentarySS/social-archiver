@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Iterator, List, Optional
 
 from backend.daterange import (
@@ -14,19 +14,32 @@ from backend.daterange import (
     order_days,
     parse_day,
 )
+from backend.gallery_dl_runner import (
+    MEDIA_EXTS,
+    GalleryDlStats,
+    apply_date_range,
+    build_gallery_dl_config,
+    date_range_status,
+    ensure_gallery_dl,
+    gallery_dl_cmd,
+    iter_gallery_dl_download,
+    looks_like_path,
+    remove_gallery_dl_config,
+    write_gallery_dl_config,
+)
 from backend.metadata import existing_avatar, save_post_metadata, save_profile
 
-MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4", ".mov", ".webm", ".mkv"}
+BOOKMARK_SUFFIX = "--bookmarks"
+LIKE_SUFFIX = "--likes"
 
 
-def _gallery_dl_cmd(*extra: str) -> List[str]:
-    # Priority: system gallery-dl (always latest) > frozen bundled gallery-dl > dev mode
-    system_gallery_dl = shutil.which("gallery-dl")
-    if system_gallery_dl:
-        return [system_gallery_dl, *extra]
-    if getattr(sys, "frozen", False):
-        return [sys.executable, "--run-gallery-dl", *extra]
-    return [sys.executable, "-m", "gallery_dl", *extra]
+def _split_twitter_user_id(user_id: str):
+    raw = (user_id or "").strip().lstrip("@")
+    if raw.endswith(BOOKMARK_SUFFIX):
+        return raw[: -len(BOOKMARK_SUFFIX)], "bookmarks", f"{raw[: -len(BOOKMARK_SUFFIX)]}{BOOKMARK_SUFFIX}"
+    if raw.endswith(LIKE_SUFFIX):
+        return raw[: -len(LIKE_SUFFIX)], "likes", f"{raw[: -len(LIKE_SUFFIX)]}{LIKE_SUFFIX}"
+    return raw, "original", raw
 
 
 def download_twitter_media(
@@ -37,18 +50,58 @@ def download_twitter_media(
     end_date: Optional[str] = None,
     concurrent: int = 3,
     naming_template: Optional[str] = None,
+    include_replies: bool = False,
+    replies_media_only: bool = False,
+    include_quotes: bool = False,
+    include_bookmarks: bool = False,
+    include_likes: bool = False,
 ) -> Iterator[Dict]:
     """Download Twitter/X media using gallery-dl, then normalize metadata for browsing."""
     del naming_template  # gallery-dl filename template is fixed for browse compatibility
-    yield {"type": "status", "msg": f"准备缓存推特用户 {user_id} 的原创内容（文字 + 图片/视频）..."}
+    base_user_id, archive_mode, storage_user_id = _split_twitter_user_id(user_id)
+    account = base_user_id
+    if archive_mode == "bookmarks":
+        include_bookmarks = False
+        include_likes = False
+        include_replies = False
+        include_quotes = False
+        yield {"type": "status", "msg": f"准备缓存 X 书签（登录账号）到 {storage_user_id}…"}
+    elif archive_mode == "likes":
+        include_bookmarks = False
+        include_likes = False
+        include_replies = False
+        include_quotes = False
+        yield {"type": "status", "msg": f"准备缓存 X 用户 {account} 的点赞时间线…"}
+    elif include_replies:
+        yield {
+            "type": "status",
+            "msg": (
+                f"准备缓存推特用户 {account} 的原创内容 + 回复时间线"
+                + ("（仅带媒体）" if replies_media_only else "")
+                + (" + 引用帖" if include_quotes else "")
+                + (" + 书签" if include_bookmarks else "")
+                + (" + 点赞" if include_likes else "")
+                + "…"
+            ),
+        }
+    elif include_quotes or include_bookmarks or include_likes:
+        extras = []
+        if include_quotes:
+            extras.append("引用帖")
+        if include_bookmarks:
+            extras.append("书签")
+        if include_likes:
+            extras.append("点赞")
+        yield {
+            "type": "status",
+            "msg": f"准备缓存推特用户 {account} 的原创内容 + {' + '.join(extras)}…",
+        }
+    else:
+        yield {"type": "status", "msg": f"准备缓存推特用户 {account} 的原创内容（文字 + 图片/视频）..."}
 
-    try:
-        subprocess.run(_gallery_dl_cmd("--version"), capture_output=True, check=True)
-    except FileNotFoundError:
-        yield {"type": "error", "msg": "无法启动 gallery-dl。开发环境请执行: pip install gallery-dl"}
-        return
-    except subprocess.CalledProcessError as e:
-        yield {"type": "error", "msg": f"gallery-dl 无法运行: {e}"}
+    err = ensure_gallery_dl()
+    if err:
+        yield {"type": "error", "msg": err}
         return
 
     parsed = _parse_twitter_auth(cookie)
@@ -63,23 +116,22 @@ def download_twitter_media(
         }
         return
 
-    user_dir = os.path.join(output_dir, "twitter", user_id)
+    user_dir = os.path.join(output_dir, "twitter", storage_user_id)
     os.makedirs(user_dir, exist_ok=True)
 
-    account = (user_id or "").strip().lstrip("@")
     twitter_cfg: Dict = {
         "filename": "{tweet_id}_{num}.{extension}",
-        "directory": ["twitter", user_id, "{date:%Y-%m-%d}"],
+        "directory": ["twitter", storage_user_id, "{date:%Y-%m-%d}"],
         "size": "orig",
         "videos": True,
         "previews": False,
         "cards": False,
         "articles": False,
         "retweets": False,
-        "quoted": False,
-        "replies": False,
+        "quoted": bool(include_quotes),
+        "replies": bool(include_replies),
         "text-tweets": True,
-        "pinned": False,
+        "pinned": True,
         "sleep-request": "1.0-2.0",
         "image-filter": "extension != 'm3u8'",
         "archive": os.path.join(user_dir, ".download-archive.sqlite"),
@@ -109,137 +161,160 @@ def download_twitter_media(
         if "ct0" not in parsed["cookies"]:
             yield {"type": "status", "msg": "未发现 ct0，若失败请把完整 Cookie 一并粘贴。"}
     if start_date or end_date:
-        start_day, end_day, swapped = order_days(parse_day(start_date), parse_day(end_date))
+        swapped = apply_date_range(twitter_cfg, start_date, end_date)
         if swapped:
-            yield {"type": "status", "msg": "起始日晚于结束日，已按从早到晚对调。"}
-        if start_day:
-            after = day_start_utc(start_day) - timedelta(seconds=1)
-            twitter_cfg["date-after"] = after.strftime("%Y-%m-%dT%H:%M:%S")
-        if end_day:
-            before = day_end_exclusive_utc(end_day)
-            twitter_cfg["date-before"] = before.strftime("%Y-%m-%dT%H:%M:%S")
+            yield {"type": "status", "msg": swapped}
 
-    config = {
-        "extractor": {
-            "base-directory": output_dir,
-            "twitter": twitter_cfg,
-        },
-        "downloader": {
-            "retries": 3,
-            "timeout": 30.0,
-            "threads": max(1, min(int(concurrent or 3), 8)),
-        },
-        "output": {
-            "skip": True,
-        },
-        "postprocessors": [
-            {
-                "name": "metadata",
-                "mode": "json",
-                "event": "post",
-                "filename": "{tweet_id}.json",
-            }
-        ],
-    }
+    postprocessors = [
+        {
+            "name": "metadata",
+            "mode": "json",
+            "event": "post",
+            "filename": "{tweet_id}.json",
+        }
+    ]
+    config = build_gallery_dl_config(output_dir, "twitter", twitter_cfg, concurrent, postprocessors)
+    config_path = write_gallery_dl_config(config)
 
-    fd, config_path = tempfile.mkstemp(prefix="social-archiver-gdl-", suffix=".json")
-    os.close(fd)
-    with open(config_path, "w", encoding="utf-8") as handle:
-        json.dump(config, handle, indent=2)
-
-    url = (
-        f"https://x.com/id:{account}/tweets"
-        if account.isdigit()
-        else f"https://x.com/{account}/tweets"
-    )
-    cmd = _gallery_dl_cmd("-c", config_path)
+    if archive_mode == "bookmarks":
+        url = "https://x.com/i/bookmarks"
+    elif archive_mode == "likes":
+        url = (
+            f"https://x.com/id:{account}/likes"
+            if account.isdigit()
+            else f"https://x.com/{account}/likes"
+        )
+    elif include_replies:
+        url = (
+            f"https://x.com/id:{account}/with_replies"
+            if account.isdigit()
+            else f"https://x.com/{account}/with_replies"
+        )
+    else:
+        url = (
+            f"https://x.com/id:{account}/tweets"
+            if account.isdigit()
+            else f"https://x.com/{account}/tweets"
+        )
+    cmd = gallery_dl_cmd("-c", config_path)
     if browser_flag:
         cmd.extend(["--cookies-from-browser", f"{browser_flag}/.x.com"])
     cmd.append(url)
     yield {"type": "status", "msg": f"启动 gallery-dl 处理 {url}"}
-    if start_date or end_date:
-        start_day, end_day, _ = order_days(parse_day(start_date), parse_day(end_date))
-        yield {
-            "type": "status",
-            "msg": f"日期范围: {start_day or '不限'} ~ {end_day or '不限'}（含首尾）",
-        }
+    range_msg = date_range_status(start_date, end_date)
+    if range_msg:
+        yield {"type": "status", "msg": range_msg}
 
-    total = 0
-    skipped = 0
-    fatal_msg = None
+    stats = GalleryDlStats()
     try:
-        process = subprocess.Popen(
+        yield from iter_gallery_dl_download(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
+            stats,
+            _map_gallery_dl_error,
+            f"gallery-dl 失败（退出码未知）。推特需要有效的 auth_token Cookie。",
         )
-        assert process.stdout is not None
-        for raw in process.stdout:
-            line = raw.strip()
-            if not line:
-                continue
-            lowered = line.lower()
-            if "skipping" in lowered or "# skip" in lowered:
-                skipped += 1
-                yield {"type": "status", "msg": line}
-                continue
-            if _looks_like_path(line):
-                total += 1
-                filename = os.path.basename(line.replace("\\", "/"))
-                yield {
-                    "type": "progress",
-                    "file": filename,
-                    "current": total,
-                    "total": total,
-                    "percent": 100.0,
-                }
-                yield {"type": "status", "msg": f"已下载: {filename}"}
-            else:
-                mapped = _map_gallery_dl_error(line)
-                if mapped:
-                    fatal_msg = mapped
-                    yield {"type": "error", "msg": mapped}
-                    process.kill()
-                    break
-                yield {"type": "status", "msg": line}
-
-        process.wait()
-        if not fatal_msg and process.returncode not in (0, None) and total == 0:
-            fatal_msg = f"gallery-dl 失败（退出码 {process.returncode}）。推特需要有效的 auth_token Cookie。"
-            yield {"type": "error", "msg": fatal_msg}
-        elif process.returncode not in (0, None) and total > 0:
-            yield {"type": "status", "msg": f"gallery-dl 退出码 {process.returncode}，将整理已下载文件。"}
     except Exception as e:
         yield {"type": "error", "msg": str(e)}
         return
     finally:
-        try:
-            os.remove(config_path)
-        except OSError:
-            pass
+        remove_gallery_dl_config(config_path)
 
-    if fatal_msg:
+    if stats.fatal_msg:
         return
 
-    yield from _fetch_twitter_avatar(
-        os.path.join(output_dir, "twitter"), user_id, account, twitter_cfg.get("cookies"), browser_flag
-    )
+    if archive_mode == "original":
+        yield from _fetch_twitter_avatar(
+            os.path.join(output_dir, "twitter"), storage_user_id, account, twitter_cfg.get("cookies"), browser_flag
+        )
 
-    written = _normalize_twitter_archive(os.path.join(output_dir, "twitter"), user_id)
+    forced_kind = None
+    profile_name = None
+    profile_extra: Dict = {}
+    if archive_mode == "bookmarks":
+        forced_kind = "bookmark"
+        profile_name = "书签"
+        profile_extra = {"archiveKind": "bookmarks", "baseUserId": base_user_id}
+    elif archive_mode == "likes":
+        forced_kind = "like"
+        profile_name = "点赞"
+        profile_extra = {"archiveKind": "likes", "baseUserId": base_user_id}
+
+    written = _normalize_twitter_archive(
+        os.path.join(output_dir, "twitter"),
+        storage_user_id,
+        replies_media_only=replies_media_only,
+        include_quotes=include_quotes,
+        forced_kind=forced_kind,
+    )
+    profile_patch = {
+        "includeReplies": bool(include_replies),
+        "repliesMediaOnly": bool(replies_media_only),
+        "includeQuotes": bool(include_quotes),
+        "includeBookmarks": bool(include_bookmarks),
+        "includeLikes": bool(include_likes),
+    }
+    if profile_name:
+        profile_patch["name"] = profile_name
+    profile_patch.update(profile_extra)
+    save_profile(os.path.join(output_dir, "twitter"), storage_user_id, profile_patch)
     avatar = existing_avatar(user_dir)
-    if avatar:
-        yield {"type": "status", "msg": f"已缓存 {written} 条原创帖子，并保存了头像。"}
+    if archive_mode == "bookmarks":
+        done_msg = f"已缓存 {written} 条书签"
+    elif archive_mode == "likes":
+        done_msg = f"已缓存 {written} 条点赞"
+    elif include_replies:
+        done_msg = f"已缓存 {written} 条帖子（含回复时间线）"
     else:
-        yield {"type": "status", "msg": f"已缓存 {written} 条原创帖子，可在浏览页查看。未找到头像。"}
+        done_msg = f"已缓存 {written} 条原创帖子"
+    if avatar:
+        yield {"type": "status", "msg": f"{done_msg}，并保存了头像。"}
+    else:
+        yield {"type": "status", "msg": f"{done_msg}，可在浏览页查看。未找到头像。"}
+
+    if archive_mode == "original" and include_bookmarks:
+        yield from _download_twitter_supplementary(
+            output_dir=output_dir,
+            base_user_id=base_user_id,
+            suffix=BOOKMARK_SUFFIX,
+            url="https://x.com/i/bookmarks",
+            label="书签",
+            forced_kind="bookmark",
+            archive_kind="bookmarks",
+            profile_name="书签",
+            parsed=parsed,
+            concurrent=concurrent,
+            browser_flag=browser_flag,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    if archive_mode == "original" and include_likes:
+        likes_url = (
+            f"https://x.com/id:{account}/likes"
+            if account.isdigit()
+            else f"https://x.com/{account}/likes"
+        )
+        yield from _download_twitter_supplementary(
+            output_dir=output_dir,
+            base_user_id=base_user_id,
+            suffix=LIKE_SUFFIX,
+            url=likes_url,
+            label="点赞",
+            forced_kind="like",
+            archive_kind="likes",
+            profile_name="点赞",
+            parsed=parsed,
+            concurrent=concurrent,
+            browser_flag=browser_flag,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
     yield {
         "type": "done",
-        "count": total,
-        "skipped": skipped,
+        "count": stats.total,
+        "skipped": stats.skipped,
         "posts": written,
-        "output_dir": os.path.join(output_dir, "twitter", user_id),
+        "output_dir": os.path.join(output_dir, "twitter", storage_user_id),
     }
 
 
@@ -283,7 +358,7 @@ def _fetch_twitter_avatar(
     os.close(fd)
     with open(config_path, "w", encoding="utf-8") as handle:
         json.dump(config, handle, indent=2)
-    cmd = _gallery_dl_cmd("-c", config_path)
+    cmd = gallery_dl_cmd("-c", config_path)
     if browser_flag:
         cmd.extend(["--cookies-from-browser", f"{browser_flag}/.x.com"])
     cmd.append(photo_url)
@@ -303,7 +378,7 @@ def _fetch_twitter_avatar(
             line = line.strip()
             if not line:
                 continue
-            if _looks_like_path(line):
+            if looks_like_path(line):
                 got = True
                 yield {"type": "status", "msg": f"已下载头像: {os.path.basename(line.replace(chr(92), '/'))}"}
             elif "error" in line.lower() or "unable" in line.lower():
@@ -319,6 +394,95 @@ def _fetch_twitter_avatar(
             os.remove(config_path)
         except OSError:
             pass
+
+
+def _download_twitter_supplementary(
+    *,
+    output_dir: str,
+    base_user_id: str,
+    suffix: str,
+    url: str,
+    label: str,
+    forced_kind: str,
+    archive_kind: str,
+    profile_name: str,
+    parsed: Dict,
+    concurrent: int,
+    browser_flag: Optional[str],
+    start_date: Optional[str],
+    end_date: Optional[str],
+) -> Iterator[Dict]:
+    storage_user_id = f"{base_user_id}{suffix}"
+    user_dir = os.path.join(output_dir, "twitter", storage_user_id)
+    os.makedirs(user_dir, exist_ok=True)
+    yield {"type": "status", "msg": f"开始缓存 X {label} 到 {storage_user_id}…"}
+
+    twitter_cfg: Dict = {
+        "filename": "{tweet_id}_{num}.{extension}",
+        "directory": ["twitter", storage_user_id, "{date:%Y-%m-%d}"],
+        "size": "orig",
+        "videos": True,
+        "previews": False,
+        "cards": False,
+        "articles": False,
+        "retweets": False,
+        "quoted": False,
+        "replies": False,
+        "text-tweets": True,
+        "pinned": False,
+        "sleep-request": "1.0-2.0",
+        "image-filter": "extension != 'm3u8'",
+        "archive": os.path.join(user_dir, ".download-archive.sqlite"),
+    }
+    if parsed["mode"] == "values":
+        cookie_file = os.path.join(user_dir, ".twitter-cookies.txt")
+        _write_netscape_cookies(cookie_file, parsed["cookies"])
+        twitter_cfg["cookies"] = cookie_file
+    if start_date or end_date:
+        swapped = apply_date_range(twitter_cfg, start_date, end_date)
+        if swapped:
+            yield {"type": "status", "msg": swapped}
+    postprocessors = [
+        {
+            "name": "metadata",
+            "mode": "json",
+            "event": "post",
+            "filename": "{tweet_id}.json",
+        }
+    ]
+    config = build_gallery_dl_config(output_dir, "twitter", twitter_cfg, concurrent, postprocessors)
+    config_path = write_gallery_dl_config(config)
+    cmd = gallery_dl_cmd("-c", config_path)
+    if browser_flag:
+        cmd.extend(["--cookies-from-browser", f"{browser_flag}/.x.com"])
+    cmd.append(url)
+    yield {"type": "status", "msg": f"启动 gallery-dl 处理 {url}"}
+    stats = GalleryDlStats()
+    try:
+        yield from iter_gallery_dl_download(
+            cmd,
+            stats,
+            _map_gallery_dl_error,
+            f"gallery-dl 失败（退出码未知）。X {label} 需要有效的 auth_token Cookie。",
+        )
+    except Exception as e:
+        yield {"type": "error", "msg": str(e)}
+        return
+    finally:
+        remove_gallery_dl_config(config_path)
+    if stats.fatal_msg:
+        return
+    written = _normalize_twitter_archive(
+        os.path.join(output_dir, "twitter"),
+        storage_user_id,
+        forced_kind=forced_kind,
+    )
+    save_profile(os.path.join(output_dir, "twitter"), storage_user_id, {
+        "name": profile_name,
+        "archiveKind": archive_kind,
+        "baseUserId": base_user_id,
+    })
+    yield {"type": "status", "msg": f"已缓存 {written} 条{label}。"}
 
 
 def _parse_twitter_auth(cookie: str) -> Dict:
@@ -405,16 +569,13 @@ def _map_gallery_dl_error(line: str) -> Optional[str]:
     return None
 
 
-def _looks_like_path(line: str) -> bool:
-    if line.startswith("#") or " " in line and not os.path.sep in line and "\\" not in line:
-        return False
-    ext = os.path.splitext(line.split("?", 1)[0])[1].lower()
-    if ext == ".json":
-        return False
-    return ext in MEDIA_EXTS or os.path.sep in line or "\\" in line
-
-
-def _normalize_twitter_archive(output_dir: str, user_id: str) -> int:
+def _normalize_twitter_archive(
+    output_dir: str,
+    user_id: str,
+    replies_media_only: bool = False,
+    include_quotes: bool = False,
+    forced_kind: Optional[str] = None,
+) -> int:
     user_dir = os.path.join(output_dir, user_id)
     if not os.path.isdir(user_dir):
         return 0
@@ -470,8 +631,13 @@ def _normalize_twitter_archive(output_dir: str, user_id: str) -> int:
                 post["date"] = date_folder
                 post["created_at"] = date_folder
 
+    quote_parents, drop_ids = _build_quote_parent_map(json_by_id, user_id) if include_quotes else ({}, set())
+
     profile_saved = False
     for tweet_id, payload in json_by_id.items():
+        if str(tweet_id) in drop_ids:
+            posts.pop(tweet_id, None)
+            continue
         post = posts.setdefault(tweet_id, {
             "id": tweet_id,
             "platform": "twitter",
@@ -513,6 +679,21 @@ def _normalize_twitter_archive(output_dir: str, user_id: str) -> int:
         if payload.get("retweet_id") or payload.get("retweeted_id") or payload.get("retweet_id_str"):
             posts.pop(tweet_id, None)
             continue
+        _apply_twitter_post_kind(post, payload)
+        if forced_kind:
+            post["original"] = False
+            post["kind"] = forced_kind
+        if payload.get("pinned"):
+            post["pinned"] = True
+        quote_info = quote_parents.get(str(tweet_id))
+        if quote_info:
+            post["original"] = False
+            post["kind"] = "quote"
+            post["quoted_from_user"] = quote_info.get("quoted_from_user") or ""
+            if quote_info.get("quoted_from_id"):
+                post["quoted_from_id"] = quote_info["quoted_from_id"]
+        elif post.get("kind") not in ("reply",):
+            _maybe_mark_quote_from_text(post)
         if isinstance(author, dict):
             handle = str(author.get("name") or user_id).lstrip("@")
             nick = str(author.get("nick") or author.get("display_name") or handle)
@@ -539,12 +720,75 @@ def _normalize_twitter_archive(output_dir: str, user_id: str) -> int:
     if found:
         save_profile(output_dir, user_id, {"avatar": os.path.basename(found)})
 
-    for post in posts.values():
+    for post in list(posts.values()):
+        if replies_media_only and post.get("kind") == "reply" and not post.get("pics"):
+            posts.pop(str(post.get("id")), None)
+            continue
+        if "kind" not in post:
+            post["original"] = True if not forced_kind else False
+            post["kind"] = forced_kind or ("media" if post.get("pics") else "text")
         post["pics"].sort(key=lambda item: int(item.get("index") or 0))
-        post["original"] = True
-        post["kind"] = "media" if post.get("pics") else "text"
         save_post_metadata(output_dir, user_id, post)
     return len(posts)
+
+
+def _apply_twitter_post_kind(post: Dict, payload: Dict) -> None:
+    reply_id = payload.get("reply_id")
+    if reply_id:
+        post["original"] = False
+        post["kind"] = "reply"
+        post["in_reply_to_id"] = str(reply_id)
+        reply_to = payload.get("reply_to")
+        if reply_to:
+            post["in_reply_to_user"] = str(reply_to).lstrip("@")
+        return
+    post["original"] = True
+    post["kind"] = "media" if post.get("pics") else "text"
+
+
+_QUOTE_STATUS_URL = re.compile(
+    r"https?://(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)/status/(\d+)",
+    re.I,
+)
+
+
+def _quote_target_from_text(text: str):
+    match = _QUOTE_STATUS_URL.search(text or "")
+    if not match:
+        return "", ""
+    return match.group(1), match.group(2)
+
+
+def _maybe_mark_quote_from_text(post: Dict) -> None:
+    user, tweet_id = _quote_target_from_text(post.get("text") or "")
+    if not user:
+        return
+    post["original"] = False
+    post["kind"] = "quote"
+    post["quoted_from_user"] = user
+    if tweet_id:
+        post["quoted_from_id"] = tweet_id
+
+
+def _build_quote_parent_map(json_by_id: Dict[str, Dict], user_id: str):
+    parents: Dict[str, Dict] = {}
+    drop_ids = set()
+    target = str(user_id or "").lstrip("@").lower()
+    for tweet_id, payload in json_by_id.items():
+        quote_by = str(payload.get("quote_by") or "").lstrip("@").lower()
+        parent_id = payload.get("quote_id")
+        if not quote_by or not parent_id or quote_by != target:
+            continue
+        author = payload.get("author") or {}
+        quoted_handle = ""
+        if isinstance(author, dict):
+            quoted_handle = str(author.get("name") or "").lstrip("@")
+        parents[str(parent_id)] = {
+            "quoted_from_user": quoted_handle,
+            "quoted_from_id": str(tweet_id),
+        }
+        drop_ids.add(str(tweet_id))
+    return parents, drop_ids
 
 
 def _read_json(path: str) -> Dict:

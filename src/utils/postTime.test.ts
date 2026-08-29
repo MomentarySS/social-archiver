@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sortPosts, postTimeMs } from './postTime.js'
+import { sortPosts, postTimeMs, filterPostsByDate } from './postTime.js'
 
 const T1 = '2024-01-15T10:00:00Z'
 const T2 = '2024-06-20T14:30:00Z'
@@ -64,6 +64,35 @@ describe('sortPosts', () => {
   it('handles null/undefined input gracefully', () => {
     expect(sortPosts(null as any, 'newest')).toEqual([])
     expect(sortPosts(undefined as any, 'newest')).toEqual([])
+  })
+
+  it('puts pinned posts first regardless of sort order', () => {
+    const posts = [
+      { id: 'new', created_at: T3 },
+      { id: 'pin', created_at: T1, pinned: true },
+      { id: 'mid', created_at: T2 },
+    ]
+    expect(sortPosts(posts, 'newest').map((p: { id: string }) => p.id)).toEqual(['pin', 'new', 'mid'])
+    expect(sortPosts(posts, 'oldest').map((p: { id: string }) => p.id)).toEqual(['pin', 'mid', 'new'])
+  })
+
+  it('ignores pinned order in all-users mode', () => {
+    const posts = [
+      { id: 'new', created_at: T3 },
+      { id: 'pin', created_at: T1, pinned: true },
+      { id: 'mid', created_at: T2 },
+    ]
+    expect(sortPosts(posts, 'newest', { allUsers: true }).map((p: { id: string }) => p.id)).toEqual(['new', 'mid', 'pin'])
+  })
+
+  it('filters posts by inclusive date range', () => {
+    const posts = [
+      { id: 'a', date: '2024-01-01' },
+      { id: 'b', date: '2024-06-15' },
+      { id: 'c', date: '2024-12-01' },
+    ]
+    const filtered = filterPostsByDate(posts, '2024-06-01', '2024-06-30')
+    expect(filtered.map((p: { id: string }) => p.id)).toEqual(['b'])
   })
 
   it('stable-sort: does not move equal timestamps relative to each other', () => {

@@ -29,6 +29,18 @@ function applySettingsPatch(current, patch) {
   } else {
     next.cookies = base.cookies || {};
   }
+  if (patch.scheduler && typeof patch.scheduler === 'object') {
+    next.scheduler = { ...(base.scheduler || {}), ...patch.scheduler };
+  }
+  if (patch.user_schedules && typeof patch.user_schedules === 'object') {
+    next.user_schedules = { ...(base.user_schedules || {}), ...patch.user_schedules };
+  }
+  if (patch.user_last_scheduled && typeof patch.user_last_scheduled === 'object') {
+    next.user_last_scheduled = { ...(base.user_last_scheduled || {}), ...patch.user_last_scheduled };
+  }
+  if (patch.ffmpeg && typeof patch.ffmpeg === 'object') {
+    next.ffmpeg = { ...(base.ffmpeg || {}), ...patch.ffmpeg };
+  }
   return next;
 }
 

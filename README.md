@@ -31,16 +31,28 @@ npm.cmd run electron:build
 
 产物：
 
-- `dist-electron\SocialArchiver-0.5.4-win.zip` — 解压后运行 `Social Archiver.exe`
+- `dist-electron\SocialArchiver-1.1.0-win.zip` — 便携 zip，解压即用
+- `dist-electron\SocialArchiver-1.1.0-win.exe` — NSIS 安装包（开始菜单 + 卸载入口）
 - `dist-electron\win-unpacked\` — 同上，开发机可直接跑这一份，不必每次解压 zip
 
 **不要只拷贝 exe**：必须保留整个 `win-unpacked` 目录（含 `resources\backend\backend.exe` 和 `_internal`）。打包版缓存日志已是 UTF-8 中文，不再乱码。
 
-里面已经带了冻结后的 `backend.exe`（微博 + gallery-dl），对方不用装 Python。未签名 exe 可能触发 SmartScreen，选「仍要运行」即可。
+里面已经带了冻结后的 `backend.exe`（微博 + gallery-dl），对方不用装 Python。
+
+### Windows SmartScreen（未签名）
+
+当前安装包与便携版**未做代码签名**。首次运行若出现「Windows 已保护你的电脑」：
+
+1. 点 **更多信息**
+2. 点 **仍要运行**
+
+若需长期在企业环境部署，可向 CA 购买 Authenticode 证书后对 `electron-builder` 配置 `win.certificateFile`；本仓库暂不捆绑证书。也可在组策略中为该 exe 添加路径排除项（需管理员权限）。
 
 开发仍用 `npm.cmd run electron:dev`，不要用 zip 里的 exe 做日常改代码。
 
 改完代码可跑 `npm.cmd test`（Vitest + Python unittest）和 `npm.cmd run build`（`vue-tsc` + Vite）做快速自检。
+
+**v1.1 浏览页：** 顶栏可按日期筛选帖子；搜索命中会高亮；可导出 JSON / RSS / Markdown。设置页校验结果可跳转帖子；可修复微博损坏实况 mp4；缓存完成会写入 `update-log.jsonl`（可选系统通知）。
 
 ## 文档
 

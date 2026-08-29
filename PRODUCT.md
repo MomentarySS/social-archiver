@@ -23,7 +23,7 @@ The archive lives on the user's disk as the source of truth: same output directo
 
 Used on Windows as an Electron shell around a Vue UI, with a Python backend. The person logs into Weibo (`m.weibo.cn` Cookie / SUB), X (`auth_token` + `ct0`), and Instagram (`sessionid`) inside the app or by paste. They pick one download root; each account is `{root}/{platform}/{user_id}/`. Daily use is: cache → browse the native-like timeline tab, or open `index.html` in a browser → later re-cache the same user into the same folder. Date range filters are optional. GPU is disabled in the packaged Electron launch because of past WebGL crashes.
 
-Distribution is a Windows zip (not an NSIS installer): unzip and run `Social Archiver.exe` with a bundled `backend.exe` (PyInstaller onedir + gallery-dl). Recipients do not install Python. The whole `win-unpacked` folder must stay together; copying only the exe breaks caching. Cache progress logs are UTF-8 end-to-end in the packaged build.
+Distribution is a Windows zip **and** optional NSIS installer (`npm run electron:build`): unzip or install, then run `Social Archiver.exe` with a bundled `backend.exe` (PyInstaller onedir + gallery-dl). Recipients do not install Python. The whole `win-unpacked` folder must stay together; copying only the exe breaks caching. Installers are **not code-signed**; SmartScreen may warn (see README). Cache progress logs are UTF-8 end-to-end in the packaged build. macOS/Linux builds were evaluated in v1.0 but are not shipped.
 
 ## Capabilities and Constraints
 
@@ -41,6 +41,8 @@ Confirmed now:
 - Videos play in the window when Chromium can decode them. Files that only the OS player can decode (often HEVC live motion) stay on disk and open via the system player from the card.
 - Profile avatars are cached next to the archive (`_avatar.jpg` / `_avatar.png` / `_avatar.webp` / `_avatar.gif`) and shown on the profile header and each post.
 - Packaged Windows zip ships a frozen backend (Weibo fetcher + gallery-dl for X and Instagram); no separate Python install for end users. At runtime, a system-installed gallery-dl is preferred when present so users can upgrade without rebuilding the app.
+- Optional X bookmarks and likes (v1.0): when enabled at cache time, stored in separate folders `{user}--bookmarks` and `{user}--likes`, labeled `kind: bookmark|like`, never mixed with the user's original timeline.
+- Markdown export (Obsidian-friendly) and local `feed.xml` RSS for note-taking and reader workflows.
 
 Undecided, do not lock:
 

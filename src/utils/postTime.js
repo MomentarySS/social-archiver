@@ -64,13 +64,44 @@ function parseTimestamp(raw) {
   return 0
 }
 
-export function sortPosts(posts, order) {
+export function sortPosts(posts, order, options = {}) {
   const newestFirst = order !== 'oldest'
+  const allUsers = Boolean(options.allUsers)
   return [...(posts || [])].sort((a, b) => {
+    if (!allUsers) {
+      const pinDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
+      if (pinDiff) return pinDiff
+    }
     const diff = postTimeMs(b) - postTimeMs(a)
     if (diff) return newestFirst ? diff : -diff
     const idDiff = String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true })
     return newestFirst ? idDiff : -idDiff
+  })
+}
+
+export function postDateKey(post) {
+  const ms = postTimeMs(post)
+  if (ms) {
+    const d = new Date(ms)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+  const match = String((post && post.date) || '').match(/^(\d{4}-\d{2}-\d{2})/)
+  return match ? match[1] : ''
+}
+
+export function filterPostsByDate(posts, startDate, endDate) {
+  const start = String(startDate || '').trim()
+  const end = String(endDate || '').trim()
+  if (!start && !end) return posts || []
+  return (posts || []).filter((post) => {
+    const key = postDateKey(post)
+    if (!key) return true
+    if (start && key < start) return false
+    if (end && key > end) return false
+    return true
   })
 }
 
