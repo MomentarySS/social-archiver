@@ -1,7 +1,7 @@
 {
   "name": "social-archiver",
   "private": true,
-  "version": "0.5.4",
+  "version": "1.1.0",
   "main": "electron-main.js",
   "scripts": {
     "dev": "vite",
@@ -39,10 +39,18 @@
     },
     "files": [
       "dist/**/*",
-      "electron-main.js",
-      "preload.js",
-      "json-lines.js",
-      "settings-merge.js",
+    "electron-main.js",
+    "preload.js",
+    "json-lines.js",
+    "settings-merge.js",
+    "electron-search.js",
+    "electron-stats.js",
+    "electron-export-md.js",
+    "electron-rss.js",
+    "electron-export-json.js",
+    "electron-update-log.js",
+    "electron-scheduler.js",
+    "app-paths.js",
       "icons/icon.ico",
       "package.json"
     ],
@@ -54,9 +62,25 @@
     ],
     "win": {
       "target": [
-        "zip"
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        },
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
       ],
       "icon": "icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Social Archiver",
+      "include": "build/installer.nsh"
     },
     "artifactName": "SocialArchiver-${version}-win.${ext}"
   }

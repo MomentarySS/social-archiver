@@ -17,6 +17,7 @@
       </div>
     </div>
     <p v-if="result" class="result" :class="result.error ? 'is-error' : 'is-ok'">{{ resultMessage }}</p>
+    <p v-if="fetchStatusHint" class="fetch-hint">{{ fetchStatusHint }}</p>
   </div>
 </template>
 
@@ -26,8 +27,9 @@ import { computed } from 'vue'
 const props = defineProps<{
   isDownloading: boolean
   progress: { percent?: number; file?: string; current?: number; total?: number } | null
-  result: { count?: number; skipped?: number; posts?: number; error?: string } | null
+  result: { count?: number; skipped?: number; posts?: number; error?: string; fetch_status?: string } | null
   postsCount?: number
+  fetchStatus?: string
 }>()
 
 const barPercent = computed(() => {
@@ -55,6 +57,17 @@ const resultMessage = computed(() => {
       return `完成：缓存 ${posts} 条原创，新下载媒体 ${files} 个，跳过 ${skipped} 个`
     }
     return `完成：新下载媒体 ${files} 个，跳过 ${skipped} 个`
+  }
+  return ''
+})
+
+const fetchStatusHint = computed(() => {
+  const status = props.fetchStatus || props.result?.fetch_status || ''
+  if (status === 'page_limit') {
+    return '仍有更早内容未拉到（已达 200 页上限）。可开启深度回溯后再次运行。'
+  }
+  if (status === 'partial') {
+    return '深度回溯未完成，下次开启深度回溯可从断点继续。'
   }
   return ''
 })
@@ -130,5 +143,12 @@ const resultMessage = computed(() => {
 
 .is-error {
   color: var(--sa-danger);
+}
+
+.fetch-hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--sa-muted);
 }
 </style>

@@ -10,6 +10,7 @@
         :batch-running="batchRunning"
         :batch-completed="batchCompleted"
         :batch-total="batchTotal"
+        :user-schedules="userSchedules"
         @select-user="handleSelectUser"
         @update-user="handleUpdateUser"
         @delete-user="handleDeleteUser"
@@ -17,6 +18,7 @@
         @batch-delete="handleBatchDelete"
         @add-user="handleAddUser"
         @stop-batch="handleStopBatch"
+        @update-schedule="handleUpdateSchedule"
       />
     </aside>
 
@@ -28,6 +30,7 @@
             <span>存档</span>
             <select v-model="selectedUser" :disabled="!users.length" @change="() => loadPosts()">
               <option value="" disabled>{{ users.length ? '选择用户' : '还没有存档' }}</option>
+              <option v-if="users.length > 1" :value="ALL_USERS_VALUE">全部用户（只读）</option>
               <option v-for="user in users" :key="user.path" :value="user.path">
                 {{ user.displayName || user.name }}
               </option>
@@ -43,6 +46,63 @@
           >刷新</button>
         </div>
         <div class="bar-right">
+          <div v-if="outputDir" class="search-box">
+            <input
+              v-model="searchQuery"
+              class="search-input"
+              type="search"
+              placeholder="搜索存档…"
+              aria-label="搜索存档"
+              @keydown.enter.prevent="runSearch"
+            />
+            <button class="ghost-btn" type="button" :disabled="searching" @click="runSearch">
+              {{ searching ? '…' : '搜' }}
+            </button>
+          </div>
+          <div v-if="outputDir && posts.length" class="date-filter">
+            <input
+              v-model="filterStartDate"
+              class="date-input"
+              type="date"
+              :max="filterEndDate || undefined"
+              aria-label="筛选起始日期"
+            />
+            <span class="date-sep">–</span>
+            <input
+              v-model="filterEndDate"
+              class="date-input"
+              type="date"
+              :min="filterStartDate || undefined"
+              aria-label="筛选结束日期"
+            />
+            <button
+              v-if="filterStartDate || filterEndDate"
+              class="ghost-btn"
+              type="button"
+              @click="clearDateFilter"
+            >清除</button>
+          </div>
+          <div
+            v-if="posts.length"
+            class="view-toggle"
+            role="tablist"
+            aria-label="浏览视图"
+          >
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="viewMode === 'timeline'"
+              :class="{ active: viewMode === 'timeline' }"
+              @click="viewMode = 'timeline'"
+            >时间线</button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="viewMode === 'gallery'"
+              :class="{ active: viewMode === 'gallery' }"
+              @click="viewMode = 'gallery'"
+            >画廊</button>
+          </div>
           <div
             v-if="posts.length"
             class="sort-toggle"
@@ -64,9 +124,9 @@
               @click="setSortOrder('oldest')"
             >最早在前</button>
           </div>
-          <span v-if="posts.length" class="post-count">{{ posts.length }} 篇</span>
+          <span v-if="posts.length" class="post-count">{{ postCountLabel }}</span>
           <button
-            v-if="currentUser"
+            v-if="currentUser && !isAllUsersMode"
             class="primary-btn"
             type="button"
             :disabled="updating || exporting"
@@ -81,7 +141,34 @@
             @click="stopUpdate"
           >停止</button>
           <button
-            v-if="posts.length"
+            v-if="posts.length && !isAllUsersMode"
+            class="primary-btn"
+            type="button"
+            :disabled="exporting || updating"
+            @click="exportMarkdown"
+          >
+            {{ exporting ? '导出中…' : '导出 Markdown' }}
+          </button>
+          <button
+            v-if="posts.length && !isAllUsersMode"
+            class="ghost-btn"
+            type="button"
+            :disabled="exporting || updating"
+            @click="exportRss"
+          >
+            {{ exporting ? '导出中…' : '导出 RSS' }}
+          </button>
+          <button
+            v-if="posts.length && !isAllUsersMode"
+            class="ghost-btn"
+            type="button"
+            :disabled="exporting || updating"
+            @click="exportJson"
+          >
+            {{ exporting ? '导出中…' : '导出 JSON' }}
+          </button>
+          <button
+            v-if="posts.length && !isAllUsersMode"
             class="primary-btn"
             type="button"
             :disabled="exporting || updating"
@@ -91,6 +178,23 @@
           </button>
         </div>
       </header>
+
+      <div v-if="searchResults.length" class="search-results">
+        <div class="search-results-head">
+          <span>找到 {{ searchResults.length }} 条</span>
+          <button class="ghost-btn" type="button" @click="clearSearch">清除</button>
+        </div>
+        <button
+          v-for="hit in searchResults"
+          :key="`${hit.userDir}:${hit.postId}`"
+          type="button"
+          class="search-hit"
+          @click="openSearchHit(hit)"
+        >
+          <span class="hit-user">{{ hit.userName }} · {{ hit.postId }}</span>
+          <span class="hit-snippet" v-html="snippetHtml(hit)"></span>
+        </button>
+      </div>
 
       <div v-if="!outputDir" class="empty-state">
         <p>还没有打开存档目录</p>
@@ -103,7 +207,16 @@
       </div>
 
       <div v-else class="feed">
-        <section v-if="currentUser" class="profile-card">
+        <section v-if="isAllUsersMode" class="profile-card profile-card-all">
+          <div class="cover"></div>
+          <div class="profile-main">
+            <div class="profile-text">
+              <h2>全部用户</h2>
+              <p>跨账号统一时间线（只读）· {{ users.length }} 个账号 · {{ posts.length }} 篇帖子</p>
+            </div>
+          </div>
+        </section>
+        <section v-else-if="currentUser" class="profile-card">
           <div class="cover"></div>
           <div class="profile-main">
             <div class="profile-avatar">
@@ -113,21 +226,32 @@
             <div class="profile-text">
               <h2>{{ currentUser.displayName || currentUser.name }}</h2>
               <p>{{ platformLabel }} / {{ currentUser.name }}</p>
+              <p v-if="userStats" class="profile-stats">
+                {{ userStats.postCount }} 帖 · {{ userStats.mediaCount }} 个媒体 · {{ formatBytes(userStats.mediaBytes) }}
+                <span v-if="userStats.earliestDate"> · {{ userStats.earliestDate }} ~ {{ userStats.latestDate }}</span>
+              </p>
             </div>
           </div>
         </section>
         <div class="feed-gap"></div>
 
-        <div v-if="displayedPosts.length" class="timeline">
+        <div v-if="viewMode === 'gallery' && displayedPosts.length" class="timeline">
+          <MediaGallery :posts="displayedPosts" @open-post="openPostFromGallery" />
+        </div>
+        <div v-else-if="displayedPosts.length" class="timeline">
           <LazyPost
             v-for="post in displayedPosts"
             :key="`${sortOrder}:${post.id || post.url}`"
             :post="post"
+            :anchor-id="postAnchorId(post)"
+            :highlight-query="activeHighlightQuery"
           />
         </div>
 
         <div v-else class="empty-state inner">
-          <p>{{ users.length ? '这个用户还没有可浏览的帖子' : '这个目录里还没有已缓存的用户' }}</p>
+          <p v-if="posts.length">当前日期范围内没有帖子</p>
+          <p v-else-if="users.length">这个用户还没有可浏览的帖子</p>
+          <p v-else>这个目录里还没有已缓存的用户</p>
         </div>
       </div>
     </main>
@@ -137,9 +261,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import LazyPost from '../components/LazyPost.vue'
+import MediaGallery from '../components/MediaGallery.vue'
 import UserManager from '../components/UserManager.vue'
 import { writeArchiveHtml } from '../utils/archiveHtml.js'
-import { sortPosts } from '../utils/postTime.js'
+import { sortPosts, filterPostsByDate } from '../utils/postTime.js'
+import { highlightSnippet } from '../utils/highlight.ts'
+import { OPEN_POST_EVENT, type OpenPostDetail } from '../utils/navBus.ts'
 import { localAssetUrl } from '../utils/assetUrl.js'
 import { PLATFORM_LABELS, normalizePlatform, type Platform } from '../constants'
 import { detectPostPlatform } from '../utils/postPlatform.js'
@@ -151,7 +278,9 @@ import {
   saveUserCookie,
 } from '../utils/session.js'
 import { useToast } from '../composables/useToast'
-import type { BatchEvent, Post, UserEntry } from '../electron-api.d.ts'
+import type { BatchEvent, Post, SearchHit, UserEntry, UserScheduleMode, UserStats } from '../electron-api.d.ts'
+
+const ALL_USERS_VALUE = '__all__'
 
 const outputDir = ref('')
 const users = ref<UserEntry[]>([])
@@ -162,6 +291,9 @@ const exporting = ref(false)
 const updating = ref(false)
 const headerAvatar = ref('')
 const sortOrder = ref<'newest' | 'oldest'>('newest')
+const viewMode = ref<'timeline' | 'gallery'>('timeline')
+const userStats = ref<UserStats | null>(null)
+const userSchedules = ref<Record<string, UserScheduleMode>>({})
 const cleanupFns: Array<() => void> = []
 const toast = useToast()
 
@@ -171,11 +303,33 @@ const batchCompleted = ref(0)
 const batchTotal = ref(0)
 const batchStatus = ref<{ queued: number; running: boolean; currentUserId?: string; currentPlatform?: string }>({ queued: 0, running: false })
 
+const searchQuery = ref('')
+const searchResults = ref<SearchHit[]>([])
+const searching = ref(false)
+const pendingHash = ref('')
+const filterStartDate = ref('')
+const filterEndDate = ref('')
+const activeHighlightQuery = ref('')
+
 // userList = users with lastUpdate populated from _profile.json
 const userList = ref<UserEntry[]>([])
 
 const currentUser = computed(() => users.value.find(u => u.path === selectedUser.value) || null)
-const displayedPosts = computed(() => sortPosts(posts.value, sortOrder.value))
+const isAllUsersMode = computed(() => selectedUser.value === ALL_USERS_VALUE)
+const filteredPosts = computed(() => filterPostsByDate(
+  posts.value,
+  filterStartDate.value,
+  filterEndDate.value,
+))
+const displayedPosts = computed(() => sortPosts(filteredPosts.value, sortOrder.value, { allUsers: isAllUsersMode.value }))
+const postCountLabel = computed(() => {
+  const total = posts.value.length
+  const shown = displayedPosts.value.length
+  if ((filterStartDate.value || filterEndDate.value) && shown !== total) {
+    return `${shown} / ${total} 篇`
+  }
+  return `${total} 篇`
+})
 
 function setSortOrder(order: 'newest' | 'oldest') {
   sortOrder.value = order
@@ -185,19 +339,154 @@ const currentPlatform = computed(() => detectPostPlatform(posts.value[0], curren
 
 const platformLabel = computed(() => PLATFORM_LABELS[currentPlatform.value as Platform] || '存档')
 
-watch(currentUser, (user) => {
-  headerAvatar.value = user?.avatar ? localAssetUrl(user.avatar) : ''
+watch(selectedUser, () => {
+  activeHighlightQuery.value = ''
 })
+
+watch(currentUser, async (user) => {
+  headerAvatar.value = user?.avatar ? localAssetUrl(user.avatar) : ''
+  await loadUserStats()
+})
+
+function formatBytes(bytes: number) {
+  if (!bytes) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let idx = 0
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024
+    idx += 1
+  }
+  return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`
+}
+
+async function loadUserSchedules() {
+  if (!window.electronAPI) return
+  const settings = await window.electronAPI.getSettings()
+  const raw = settings.user_schedules || {}
+  const next: Record<string, UserScheduleMode> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    next[key] = value === 'daily' || value === 'weekly' ? value : 'manual'
+  }
+  userSchedules.value = next
+}
+
+async function loadUserStats() {
+  userStats.value = null
+  if (!selectedUser.value || !window.electronAPI) return
+  try {
+    userStats.value = await window.electronAPI.getUserStats(selectedUser.value)
+  } catch (e) { /* ignore */ }
+}
+
+async function handleUpdateSchedule(payload: { platform: string; userId: string; schedule: string }) {
+  if (!window.electronAPI) return
+  const key = `${payload.platform}:${payload.userId}`
+  const schedule: UserScheduleMode = payload.schedule === 'daily' || payload.schedule === 'weekly'
+    ? payload.schedule
+    : 'manual'
+  userSchedules.value = { ...userSchedules.value, [key]: schedule }
+  await window.electronAPI.saveSettings({ user_schedules: { [key]: schedule } })
+}
+
+function openPostFromGallery(postId: string) {
+  if (!postId) return
+  viewMode.value = 'timeline'
+  const anchor = `post-${postId}`
+  window.location.hash = anchor
+  scrollToPostFromHash()
+}
+
+function postAnchorId(post: Post) {
+  const id = String(post.id || '').trim()
+  return id ? `post-${id}` : ''
+}
+
+function scrollToPostFromHash() {
+  const hash = (window.location.hash || '').replace(/^#/, '')
+  if (!hash) return
+  pendingHash.value = hash
+  requestAnimationFrame(() => {
+    const el = document.getElementById(hash)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      pendingHash.value = ''
+    }
+  })
+}
+
+function clearDateFilter() {
+  filterStartDate.value = ''
+  filterEndDate.value = ''
+}
+
+function snippetHtml(hit: SearchHit) {
+  return highlightSnippet(hit.snippet || '', searchQuery.value)
+}
+
+async function runSearch() {
+  const q = searchQuery.value.trim()
+  if (!q || !outputDir.value || !window.electronAPI) return
+  searching.value = true
+  try {
+    const res = await window.electronAPI.searchArchives({ outputDir: outputDir.value, query: q })
+    if (res.error) {
+      toast.error(res.error)
+      searchResults.value = []
+      return
+    }
+    searchResults.value = res.hits || []
+    if (!searchResults.value.length) toast.info('没有匹配的帖子')
+  } catch (e) {
+    toast.error('搜索失败')
+  } finally {
+    searching.value = false
+  }
+}
+
+function clearSearch() {
+  searchQuery.value = ''
+  searchResults.value = []
+  activeHighlightQuery.value = ''
+}
+
+async function openSearchHit(hit: SearchHit) {
+  activeHighlightQuery.value = searchQuery.value.trim()
+  selectedUser.value = hit.userDir
+  await loadPosts()
+  const anchor = `post-${hit.postId}`
+  window.location.hash = anchor
+  scrollToPostFromHash()
+  searchResults.value = []
+}
+
+async function openPostFromNav(detail: OpenPostDetail) {
+  if (!detail?.userDir || !detail.postId) return
+  activeHighlightQuery.value = detail.highlightQuery || ''
+  selectedUser.value = detail.userDir
+  await loadPosts()
+  const anchor = `post-${detail.postId}`
+  window.location.hash = anchor
+  scrollToPostFromHash()
+}
+
+function onOpenPostEvent(event: Event) {
+  const detail = (event as CustomEvent<OpenPostDetail>).detail
+  if (detail) void openPostFromNav(detail)
+}
 
 onMounted(async () => {
   setupUpdateListeners()
   setupBatchListeners()
+  window.addEventListener('hashchange', scrollToPostFromHash)
+  window.addEventListener(OPEN_POST_EVENT, onOpenPostEvent as EventListener)
   try {
     if (window.electronAPI) {
       updating.value = await window.electronAPI.isDownloading()
       const settings = await window.electronAPI.getSettings()
       if (settings.output_dir) {
         outputDir.value = settings.output_dir
+        await loadUserSchedules()
         await scanUsers()
       }
     }
@@ -205,6 +494,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('hashchange', scrollToPostFromHash)
+  window.removeEventListener(OPEN_POST_EVENT, onOpenPostEvent as EventListener)
   cleanupFns.forEach((fn) => fn())
 })
 
@@ -252,12 +543,26 @@ async function loadPosts(opts?: { silent?: boolean }) {
   }
   try {
     if (window.electronAPI) {
-      posts.value = await window.electronAPI.getPosts(selectedUser.value)
+      if (selectedUser.value === ALL_USERS_VALUE) {
+        if (!outputDir.value) {
+          posts.value = []
+          return
+        }
+        posts.value = await window.electronAPI.getAllPosts(outputDir.value)
+      } else {
+        posts.value = await window.electronAPI.getPosts(selectedUser.value)
+      }
     }
   } catch (e) {
     toast.error('加载帖子失败')
   } finally {
     loading.value = false
+    if (!isAllUsersMode.value) {
+      await loadUserStats()
+    } else {
+      userStats.value = null
+    }
+    scrollToPostFromHash()
   }
 }
 
@@ -298,7 +603,10 @@ async function ensureCookie(platform: string, userId: string) {
   return res.cookie
 }
 
-async function startUserDownload(user: UserEntry, dates?: { startDate?: string; endDate?: string }) {
+async function startUserDownload(
+  user: UserEntry,
+  dates?: { startDate?: string; endDate?: string; deepBacktrack?: boolean; includeReplies?: boolean; repliesMediaOnly?: boolean; includeQuotes?: boolean; includeBookmarks?: boolean; includeLikes?: boolean; includeQuoted?: boolean; includeReels?: boolean; includeStories?: boolean },
+) {
   if (!user || !outputDir.value || !window.electronAPI) return
   if (updating.value || await window.electronAPI.isDownloading()) {
     toast.warning('已有缓存任务进行中')
@@ -319,6 +627,15 @@ async function startUserDownload(user: UserEntry, dates?: { startDate?: string; 
       endDate: dates?.endDate || null,
       concurrent: settings.concurrent,
       namingTemplate: settings.naming_template,
+      deepBacktrack: userPlatform === 'weibo' ? Boolean(dates?.deepBacktrack) : false,
+      includeReplies: userPlatform === 'twitter' ? Boolean(dates?.includeReplies) : false,
+      repliesMediaOnly: userPlatform === 'twitter' ? Boolean(dates?.repliesMediaOnly) : false,
+      includeQuotes: userPlatform === 'twitter' ? Boolean(dates?.includeQuotes) : false,
+      includeBookmarks: userPlatform === 'twitter' ? Boolean(dates?.includeBookmarks) : false,
+      includeLikes: userPlatform === 'twitter' ? Boolean(dates?.includeLikes) : false,
+      includeQuoted: userPlatform === 'weibo' ? Boolean(dates?.includeQuoted) : false,
+      includeReels: userPlatform === 'instagram' ? Boolean(dates?.includeReels) : false,
+      includeStories: userPlatform === 'instagram' ? Boolean(dates?.includeStories) : false,
     })
     if (!res.success) {
       updating.value = false
@@ -449,7 +766,22 @@ async function handleBatchDelete(paths: string[]) {
   }
 }
 
-async function handleAddUser(data: { platform: string; userId: string; cookie: string; startDate?: string; endDate?: string }) {
+async function handleAddUser(data: {
+  platform: string
+  userId: string
+  cookie: string
+  startDate?: string
+  endDate?: string
+  deepBacktrack?: boolean
+  includeReplies?: boolean
+  repliesMediaOnly?: boolean
+  includeQuotes?: boolean
+  includeBookmarks?: boolean
+  includeLikes?: boolean
+  includeQuoted?: boolean
+  includeReels?: boolean
+  includeStories?: boolean
+}) {
   if (!window.electronAPI) return
   if (!outputDir.value) {
     toast.warning('请先选择存档目录')
@@ -467,7 +799,19 @@ async function handleAddUser(data: { platform: string; userId: string; cookie: s
     toast.info('该用户已存在，开始更新…')
     selectedUser.value = existing.path
     await loadPosts()
-    await startUserDownload(existing, { startDate: data.startDate, endDate: data.endDate })
+    await startUserDownload(existing, {
+      startDate: data.startDate,
+      endDate: data.endDate,
+      deepBacktrack: data.deepBacktrack,
+      includeReplies: data.includeReplies,
+      repliesMediaOnly: data.repliesMediaOnly,
+      includeQuotes: data.includeQuotes,
+      includeBookmarks: data.includeBookmarks,
+      includeLikes: data.includeLikes,
+      includeQuoted: data.includeQuoted,
+      includeReels: data.includeReels,
+      includeStories: data.includeStories,
+    })
     return
   }
 
@@ -483,6 +827,15 @@ async function handleAddUser(data: { platform: string; userId: string; cookie: s
       endDate: data.endDate || null,
       concurrent: settings.concurrent,
       namingTemplate: settings.naming_template,
+      deepBacktrack: data.platform === 'weibo' ? Boolean(data.deepBacktrack) : false,
+      includeReplies: data.platform === 'twitter' ? Boolean(data.includeReplies) : false,
+      repliesMediaOnly: data.platform === 'twitter' ? Boolean(data.repliesMediaOnly) : false,
+      includeQuotes: data.platform === 'twitter' ? Boolean(data.includeQuotes) : false,
+      includeBookmarks: data.platform === 'twitter' ? Boolean(data.includeBookmarks) : false,
+      includeLikes: data.platform === 'twitter' ? Boolean(data.includeLikes) : false,
+      includeQuoted: data.platform === 'weibo' ? Boolean(data.includeQuoted) : false,
+      includeReels: data.platform === 'instagram' ? Boolean(data.includeReels) : false,
+      includeStories: data.platform === 'instagram' ? Boolean(data.includeStories) : false,
     })
     if (!res.success) {
       updating.value = false
@@ -555,6 +908,69 @@ async function refreshCurrentArchive(userDir?: string, opts?: { silent?: boolean
     }
     await loadPosts({ silent: opts?.silent })
   } catch (e) { /* ignore */ }
+}
+
+async function exportMarkdown() {
+  if (!selectedUser.value || !window.electronAPI) {
+    toast.warning('没有可导出的内容')
+    return
+  }
+  exporting.value = true
+  try {
+    const res = await window.electronAPI.exportMarkdown({ userDir: selectedUser.value })
+    if (res.success) {
+      toast.success(`已导出 ${res.count || 0} 篇 Markdown`)
+      if (res.destDir) await window.electronAPI.openFolder(res.destDir)
+    } else {
+      toast.error(res.error || '导出失败')
+    }
+  } catch (e) {
+    toast.error('导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function exportRss() {
+  if (!selectedUser.value || !window.electronAPI) {
+    toast.warning('没有可导出的内容')
+    return
+  }
+  exporting.value = true
+  try {
+    const res = await window.electronAPI.exportRss({ userDir: selectedUser.value })
+    if (res.success) {
+      toast.success(`已生成 RSS（${res.count || 0} 条）`)
+      if (res.destPath) await window.electronAPI.openFolder(selectedUser.value)
+    } else {
+      toast.error(res.error || '导出失败')
+    }
+  } catch (e) {
+    toast.error('导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function exportJson() {
+  if (!selectedUser.value || !window.electronAPI) {
+    toast.warning('没有可导出的内容')
+    return
+  }
+  exporting.value = true
+  try {
+    const res = await window.electronAPI.exportJson({ userDir: selectedUser.value })
+    if (res.success) {
+      toast.success(`已导出 ${res.count || 0} 篇 JSON`)
+      if (res.destPath) await window.electronAPI.openFolder(selectedUser.value)
+    } else {
+      toast.error(res.error || '导出失败')
+    }
+  } catch (e) {
+    toast.error('导出失败')
+  } finally {
+    exporting.value = false
+  }
 }
 
 async function exportHtml() {
@@ -705,6 +1121,128 @@ async function exportHtml() {
 .post-count {
   font-size: 13px;
   color: var(--sa-muted);
+}
+
+.view-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.view-toggle button {
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--sa-edge);
+  background: transparent;
+  color: var(--sa-muted);
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.view-toggle button.active {
+  background: var(--sa-accent);
+  border-color: var(--sa-accent);
+  color: #fff;
+}
+
+.profile-stats {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--sa-muted);
+  line-height: 1.5;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.date-input {
+  width: 118px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--sa-edge);
+  background: var(--sa-field);
+  color: var(--sa-ink);
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.date-sep {
+  color: var(--sa-muted);
+  font-size: 12px;
+}
+
+:deep(.sa-search-mark) {
+  background: rgba(255, 214, 0, 0.45);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.search-input {
+  width: 140px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--sa-edge);
+  background: var(--sa-field);
+  color: var(--sa-ink);
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.search-results {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 8px 16px 0;
+  background: var(--sa-surface);
+  border-bottom: 1px solid var(--sa-hairline);
+}
+
+.search-results-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--sa-muted);
+  margin-bottom: 6px;
+}
+
+.search-hit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 8px 0;
+  border-top: 1px solid var(--sa-hairline);
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.hit-user {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.hit-snippet {
+  display: block;
+  font-size: 13px;
+  color: var(--sa-muted);
+  line-height: 1.4;
 }
 
 .feed {

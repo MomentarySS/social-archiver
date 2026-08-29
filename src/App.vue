@@ -50,7 +50,16 @@ import SaToast from './components/SaToast.vue'
 import { toastItems } from './composables/useToast'
 import { browseTheme, toggleBrowseTheme } from './theme.js'
 
+import { OPEN_TAB_EVENT } from './utils/navBus.ts'
+
 const activeTab = ref<'download' | 'browse' | 'settings'>('download')
+
+function onOpenTab(event: Event) {
+  const tab = (event as CustomEvent<{ tab?: string }>).detail?.tab
+  if (tab === 'download' || tab === 'browse' || tab === 'settings') {
+    activeTab.value = tab
+  }
+}
 
 function handleShortcut(event: KeyboardEvent) {
   if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
@@ -68,10 +77,12 @@ function handleShortcut(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleShortcut)
+  window.addEventListener(OPEN_TAB_EVENT, onOpenTab as EventListener)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleShortcut)
+  window.removeEventListener(OPEN_TAB_EVENT, onOpenTab as EventListener)
 })
 </script>
 

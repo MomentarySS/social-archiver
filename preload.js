@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Browse archive
   scanArchives: (outputDir) => ipcRenderer.invoke('scan-archives', outputDir),
   getPosts: (userDir) => ipcRenderer.invoke('get-posts', userDir),
+  getAllPosts: (outputDir) => ipcRenderer.invoke('get-all-posts', outputDir),
   saveHtml: (params) => ipcRenderer.invoke('save-html', params),
   openFolder: (folderPath) => ipcRenderer.invoke('open-folder', folderPath),
   openLocalPath: (filePath) => ipcRenderer.invoke('open-local-path', filePath),
@@ -51,4 +52,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Archive management
   deleteArchives: (paths, rootDir) => ipcRenderer.invoke('delete-archives', { paths, rootDir }),
   getUserLastUpdate: (userDir) => ipcRenderer.invoke('get-user-last-update', userDir),
+  searchArchives: (params) => ipcRenderer.invoke('search-archives', params),
+  rebuildSearchIndex: (outputDir) => ipcRenderer.invoke('rebuild-search-index', outputDir),
+  verifyArchives: (params) => ipcRenderer.invoke('verify-archives', params),
+  checkCookie: (params) => ipcRenderer.invoke('check-cookie', params),
+  getPortableInfo: () => ipcRenderer.invoke('get-portable-info'),
+  getUserStats: (userDir) => ipcRenderer.invoke('get-user-stats', userDir),
+  getArchiveStats: (outputDir) => ipcRenderer.invoke('get-archive-stats', outputDir),
+  exportMarkdown: (params) => ipcRenderer.invoke('export-markdown', params),
+  exportRss: (params) => ipcRenderer.invoke('export-rss', params),
+  exportJson: (params) => ipcRenderer.invoke('export-json', params),
+  repairWeiboMedia: (params) => ipcRenderer.invoke('repair-weibo-media', params),
+  probeFfmpeg: () => ipcRenderer.invoke('probe-ffmpeg'),
+  transcodeArchives: (params) => ipcRenderer.invoke('transcode-archives', params),
+  generatePosters: (params) => ipcRenderer.invoke('generate-posters', params),
 });

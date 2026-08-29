@@ -17,6 +17,17 @@ REQUEST_SLEEP = 1.2
 EXISTING_STREAK_STOP = 5
 
 
+def _read_user_profile(user_dir: str) -> Dict:
+    path = os.path.join(user_dir, "_profile.json")
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle) or {}
+    except Exception:
+        return {}
+
+
 def download_weibo_media(
     user_id: str,
     cookie: str,
@@ -25,9 +36,14 @@ def download_weibo_media(
     end_date: Optional[str] = None,
     concurrent: int = 3,
     naming_template: Optional[str] = None,
+    deep_backtrack: bool = False,
+    include_quoted: bool = False,
 ) -> Iterator[Dict]:
     """Download a Weibo user's timeline media via the m.weibo.cn API."""
-    yield {"type": "status", "msg": f"准备缓存微博用户 {user_id} 的原创内容（文字 + 图片/视频）..."}
+    if include_quoted:
+        yield {"type": "status", "msg": f"准备缓存微博用户 {user_id} 的原创内容 + 带评论转发（标注引用）…"}
+    else:
+        yield {"type": "status", "msg": f"准备缓存微博用户 {user_id} 的原创内容（文字 + 图片/视频）..."}
     start_dt, end_dt, swapped = order_days(parse_day(start_date), parse_day(end_date))
     if start_dt or end_dt:
         yield {
@@ -60,9 +76,21 @@ def download_weibo_media(
     os.makedirs(os.path.join(output_dir, "weibo"), exist_ok=True)
     workers = max(1, min(int(concurrent or 3), 10))
     template = naming_template or "{post_id}_{index}"
+    user_dir = os.path.join(output_dir, "weibo", str(user_id))
+    profile = _read_user_profile(user_dir)
 
     page = 1
     since_id = ""
+    if deep_backtrack and profile.get("lastSinceId") and profile.get("fetchStatus") in ("partial", "page_limit"):
+        since_id = str(profile.get("lastSinceId") or "")
+        page = max(1, int(profile.get("lastPage") or 1))
+        sid_hint = f"{since_id[:12]}…" if len(since_id) > 12 else since_id
+        yield {
+            "type": "status",
+            "msg": f"深度回溯：从第 {page} 页断点继续（since_id={sid_hint}）",
+        }
+    elif deep_backtrack:
+        yield {"type": "status", "msg": "深度回溯：将忽略「连续已缓存即停」，直至无更多页或达到页数上限。"}
     total_downloaded = 0
     total_skipped = 0
     total_posts = 0
@@ -73,7 +101,8 @@ def download_weibo_media(
     failed = False
     seen_ids = set()
     existing_streak = 0
-    user_dir = os.path.join(output_dir, "weibo", str(user_id))
+    hit_page_limit = False
+    natural_end = False
 
     while page <= MAX_PAGES and not reached_start and not reached_existing:
         params = {
@@ -125,6 +154,7 @@ def download_weibo_media(
         cards = _iter_mblog_cards((data.get("data") or {}).get("cards") or [])
         if not cards:
             yield {"type": "status", "msg": "没有更多内容了。"}
+            natural_end = True
             break
 
         download_jobs: List[Tuple[str, str, Dict[str, str]]] = []
@@ -142,8 +172,10 @@ def download_weibo_media(
                 seen_ids.add(post_id)
                 new_on_page += 1
 
-            if not _is_original(mblog, user_id):
+            if not _should_include_mblog(mblog, user_id, include_quoted):
                 continue
+
+            post_kind = _mblog_kind(mblog, user_id, include_quoted)
 
             post_dt = parse_weibo_created_at(created_at)
             post_day = post_dt.date() if post_dt else None
@@ -159,7 +191,7 @@ def download_weibo_media(
             date_folder = _format_date(created_at)
             if post_id and _archive_post_complete(user_dir, date_folder, post_id):
                 skipped_existing += 1
-                if not start_dt and not pinned:
+                if not deep_backtrack and not start_dt and not pinned:
                     existing_streak += 1
                     if existing_streak >= EXISTING_STREAK_STOP:
                         reached_existing = True
@@ -192,7 +224,9 @@ def download_weibo_media(
             if not media_items and not _plain_text(mblog.get("text") or ""):
                 continue
 
-            metadata = _build_metadata(mblog, user_id, media_items, date_folder, template)
+            metadata = _build_metadata(
+                mblog, user_id, media_items, date_folder, template, post_kind, pinned=pinned,
+            )
             save_post_metadata(os.path.join(output_dir, "weibo"), user_id, metadata)
             total_posts += 1
             if not media_items:
@@ -244,15 +278,24 @@ def download_weibo_media(
 
         if new_on_page == 0:
             yield {"type": "status", "msg": "没有更多内容了。"}
+            natural_end = True
             break
 
         next_since = _next_since_id(data, last_mblog_id)
         if not next_since or next_since == since_id:
             yield {"type": "status", "msg": "没有更多内容了。"}
+            natural_end = True
             break
 
         since_id = next_since
         page += 1
+        if deep_backtrack:
+            save_profile(os.path.join(output_dir, "weibo"), user_id, {
+                "lastSinceId": since_id,
+                "lastPage": page,
+                "fetchStatus": "partial",
+                "deepBacktrack": True,
+            })
         yield {
             "type": "status",
             "msg": f"已缓存 {total_posts} 条原创（文字 {total_text}，含媒体 {total_posts - total_text}）",
@@ -263,13 +306,36 @@ def download_weibo_media(
         return
 
     if page > MAX_PAGES and not reached_start and not reached_existing:
+        hit_page_limit = True
         yield {
             "type": "status",
             "msg": (
                 f"已翻到 {MAX_PAGES} 页上限，更早的微博未拉到。"
-                "可设起始日期分段缓存，或以后再更新。"
+                "可开启深度回溯并再次运行以从断点继续，或设起始日期分段缓存。"
             ),
         }
+
+    if natural_end or reached_start or (reached_existing and not deep_backtrack):
+        fetch_status = "complete"
+    elif hit_page_limit:
+        fetch_status = "page_limit"
+    elif deep_backtrack:
+        fetch_status = "partial"
+    else:
+        fetch_status = "complete"
+
+    profile_patch = {
+        "fetchStatus": fetch_status,
+        "deepBacktrack": bool(deep_backtrack),
+        "includeQuoted": bool(include_quoted),
+    }
+    if fetch_status == "complete":
+        profile_patch["lastSinceId"] = ""
+        profile_patch["lastPage"] = 0
+    elif deep_backtrack and since_id:
+        profile_patch["lastSinceId"] = since_id
+        profile_patch["lastPage"] = page
+    save_profile(os.path.join(output_dir, "weibo"), user_id, profile_patch)
 
     extra = f"，跳过已有 {skipped_existing} 条" if skipped_existing else ""
     yield {
@@ -281,6 +347,7 @@ def download_weibo_media(
         "count": total_downloaded,
         "skipped": total_skipped,
         "posts": total_posts,
+        "fetch_status": fetch_status,
         "output_dir": os.path.join(output_dir, "weibo", user_id),
     }
 
@@ -346,6 +413,39 @@ def _is_original(mblog: Dict, user_id: str) -> bool:
         or ""
     )
     return not owner or owner == str(user_id)
+
+
+def _forward_has_comment(mblog: Dict) -> bool:
+    text = _plain_text(mblog.get("text") or "")
+    inner = mblog.get("retweeted_status") or {}
+    inner_text = _plain_text(inner.get("text") or "")
+    if not inner_text:
+        return bool(text.strip())
+    if text.strip() == inner_text.strip():
+        return False
+    if text.strip().startswith("转发微博") and len(text.strip()) <= len(inner_text.strip()) + 8:
+        return False
+    return True
+
+
+def _should_include_mblog(mblog: Dict, user_id: str, include_quoted: bool) -> bool:
+    if _is_original(mblog, user_id):
+        return True
+    return include_quoted and bool(mblog.get("retweeted_status")) and _forward_has_comment(mblog)
+
+
+def _mblog_kind(mblog: Dict, user_id: str, include_quoted: bool) -> str:
+    if _is_original(mblog, user_id):
+        return "original"
+    if include_quoted and mblog.get("retweeted_status") and _forward_has_comment(mblog):
+        return "quote"
+    return "original"
+
+
+def _quoted_from_weibo(mblog: Dict) -> str:
+    inner = mblog.get("retweeted_status") or {}
+    user = inner.get("user") or {}
+    return str(user.get("screen_name") or user.get("name") or "")
 
 
 def _plain_text(html: str) -> str:
@@ -556,6 +656,8 @@ def _build_metadata(
     media_items: List[Dict],
     date_folder: str,
     template: str,
+    post_kind: str = "original",
+    pinned: bool = False,
 ) -> Dict:
     pics = []
     post_id = str(mblog.get("id") or "")
@@ -587,7 +689,7 @@ def _build_metadata(
         card_title = (page_info.get("page_title") or page_info.get("content1") or "").strip()
         if card_title and card_title not in text:
             text = f"{text}\n{card_title}" if text else card_title
-    return {
+    meta = {
         "id": post_id,
         "platform": "weibo",
         "user_id": user_id,
@@ -599,13 +701,24 @@ def _build_metadata(
         "url": f"https://weibo.com/{user_id}/{mblog.get('mblogid', post_id)}",
         "source": mblog.get("source", ""),
         "verified": bool(user.get("verified")),
-        "original": True,
+        "original": post_kind != "quote",
         "kind": "media" if pics else "text",
         "reposts": int(mblog.get("reposts_count") or 0),
         "comments": int(mblog.get("comments_count") or 0),
         "likes": int(mblog.get("attitudes_count") or 0),
         "pics": pics,
     }
+    if pinned:
+        meta["pinned"] = True
+    if post_kind == "quote":
+        meta["kind"] = "quote"
+        meta["original"] = False
+        meta["quoted_from_user"] = _quoted_from_weibo(mblog)
+        inner = mblog.get("retweeted_status") or {}
+        quoted_id = str(inner.get("id") or inner.get("mid") or "")
+        if quoted_id:
+            meta["quoted_from_id"] = quoted_id
+    return meta
 
 
 def _download_jobs(

@@ -71,7 +71,7 @@ function postMarkup(post, { name, account, platform }) {
 
   if (platform === 'twitter') {
     return `
-      <article class="post x-post" data-ts="${ts}" data-id="${idAttr}">
+      <article class="post x-post" id="post-${idAttr}" data-ts="${ts}" data-id="${idAttr}">
         <div class="name">${escapeHtml(post.user_name || name)} <span class="handle">@${escapeHtml(post.screen_name || account)}</span> · ${date}</div>
         ${text ? `<p class="text">${text}</p>` : ''}
         <div class="${mediaClass}">${images}</div>
@@ -81,7 +81,7 @@ function postMarkup(post, { name, account, platform }) {
 
   if (platform === 'instagram') {
     return `
-      <article class="post" data-ts="${ts}" data-id="${idAttr}">
+      <article class="post" id="post-${idAttr}" data-ts="${ts}" data-id="${idAttr}">
         <div class="name">${escapeHtml(post.user_name || name)} <span class="handle">@${escapeHtml(post.screen_name || account)}</span> · ${date}</div>
         ${text ? `<p class="text">${text}</p>` : ''}
         <div class="${mediaClass}">${images}</div>
@@ -90,7 +90,7 @@ function postMarkup(post, { name, account, platform }) {
   }
 
   return `
-    <article class="post" data-ts="${ts}" data-id="${idAttr}">
+    <article class="post" id="post-${idAttr}" data-ts="${ts}" data-id="${idAttr}">
       <div class="name">${escapeHtml(post.user_name || name)}</div>
       ${text ? `<p class="text">${text}</p>` : ''}
       <div class="${mediaClass}">${images}</div>
@@ -336,6 +336,14 @@ function archiveLightbox() {
       applySort(btn.getAttribute('data-order'));
     });
   });
+  function scrollToHash() {
+    var hash = (location.hash || '').replace(/^#/, '');
+    if (!hash) return;
+    var el = document.getElementById(hash);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  scrollToHash();
+  window.addEventListener('hashchange', scrollToHash);
 })();
 </script>`
 }

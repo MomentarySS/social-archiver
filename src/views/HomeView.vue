@@ -39,6 +39,49 @@
         </div>
       </div>
 
+      <label v-if="platform === 'weibo'" class="sa-field sa-check">
+        <input type="checkbox" v-model="deepBacktrack" />
+        <span>深度回溯（忽略「连续已缓存即停」，可从断点继续拉更早内容）</span>
+      </label>
+      <label v-if="platform === 'weibo'" class="sa-field sa-check">
+        <input type="checkbox" v-model="includeQuoted" />
+        <span>收录带评论转发（标注「引用自 @xxx」，纯转发仍不收）</span>
+      </label>
+
+      <template v-if="platform === 'twitter'">
+        <label class="sa-field sa-check">
+          <input type="checkbox" v-model="includeReplies" />
+          <span>同时缓存回复时间线（独立帖文，会标注为「回复 @xxx」）</span>
+        </label>
+        <label v-if="includeReplies" class="sa-field sa-check sa-check-sub">
+          <input type="checkbox" v-model="repliesMediaOnly" />
+          <span>回复仅保留带图片/视频的帖</span>
+        </label>
+        <label class="sa-field sa-check">
+          <input type="checkbox" v-model="includeQuotes" />
+          <span>同时缓存引用帖（标注「引用自 @xxx」，不收录他人被引用正文）</span>
+        </label>
+        <label class="sa-field sa-check">
+          <input type="checkbox" v-model="includeBookmarks" />
+          <span>同时缓存登录账号的书签（独立子目录，后缀 <strong>--bookmarks</strong>）</span>
+        </label>
+        <label class="sa-field sa-check">
+          <input type="checkbox" v-model="includeLikes" />
+          <span>同时缓存该用户的点赞时间线（独立子目录，后缀 <strong>--likes</strong>）</span>
+        </label>
+      </template>
+
+      <template v-if="platform === 'instagram'">
+        <label class="sa-field sa-check">
+          <input type="checkbox" v-model="includeReels" />
+          <span>同时缓存 Reels（短视频）</span>
+        </label>
+        <label class="sa-field sa-check">
+          <input type="checkbox" v-model="includeStories" />
+          <span>同时缓存 Stories（时效内容，平台约 24 小时后可能失效）</span>
+        </label>
+      </template>
+
       <div class="sa-row action-row">
         <button
           class="sa-btn sa-btn-primary sa-btn-wide"
@@ -61,6 +104,7 @@
         :progress="progress"
         :result="result"
         :posts-count="postsCount"
+        :fetch-status="fetchStatus"
       />
 
       <LogPanel :logs="logs" @clear="clearLogs" />
@@ -93,6 +137,7 @@ interface Result {
   skipped?: number
   posts?: number
   error?: string
+  fetch_status?: string
 }
 
 interface LogEntry {
@@ -108,12 +153,22 @@ const cookieByPlatform = ref<{ twitter: string; weibo: string; instagram: string
 const output_dir = ref('')
 const startDate = ref('')
 const endDate = ref('')
+const deepBacktrack = ref(false)
+const includeReplies = ref(false)
+const repliesMediaOnly = ref(false)
+const includeQuotes = ref(false)
+const includeBookmarks = ref(false)
+const includeLikes = ref(false)
+const includeQuoted = ref(false)
+const includeReels = ref(false)
+const includeStories = ref(false)
 const concurrent = ref(3)
 const namingTemplate = ref('{post_id}_{index}')
 const isDownloading = ref(false)
 const progress = ref<Progress | null>(null)
 const result = ref<Result | null>(null)
 const postsCount = ref<number | undefined>(undefined)
+const fetchStatus = ref('')
 const logs = ref<LogEntry[]>([])
 const cleanupFns: Array<() => void> = []
 const settingsReady = ref(false)
@@ -170,6 +225,7 @@ async function handleDownload() {
   progress.value = null
   result.value = null
   postsCount.value = undefined
+  fetchStatus.value = ''
   isDownloading.value = true
   logs.value = []
 
@@ -189,6 +245,15 @@ async function handleDownload() {
         endDate: endDate.value || null,
         concurrent: concurrent.value,
         namingTemplate: namingTemplate.value,
+        deepBacktrack: platform.value === 'weibo' ? deepBacktrack.value : false,
+        includeReplies: platform.value === 'twitter' ? includeReplies.value : false,
+        repliesMediaOnly: platform.value === 'twitter' ? repliesMediaOnly.value : false,
+        includeQuotes: platform.value === 'twitter' ? includeQuotes.value : false,
+        includeBookmarks: platform.value === 'twitter' ? includeBookmarks.value : false,
+        includeLikes: platform.value === 'twitter' ? includeLikes.value : false,
+        includeQuoted: platform.value === 'weibo' ? includeQuoted.value : false,
+        includeReels: platform.value === 'instagram' ? includeReels.value : false,
+        includeStories: platform.value === 'instagram' ? includeStories.value : false,
       })
       
       if (!res.success) {
@@ -278,7 +343,9 @@ async function handleDownloadEvent(event: DownloadEvent) {
       count: event.count,
       skipped: event.skipped,
       posts: event.posts,
+      fetch_status: event.fetch_status,
     }
+    fetchStatus.value = event.fetch_status || ''
     isDownloading.value = false
     addLog(formatDoneMessage(event), 'success')
     if (event.output_dir) {
@@ -382,5 +449,22 @@ onUnmounted(() => {
 .date-sep {
   color: var(--sa-muted);
   font-size: 13px;
+}
+
+.sa-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--sa-muted);
+}
+
+.sa-check input {
+  margin-top: 3px;
+}
+
+.sa-check-sub {
+  margin-left: 22px;
 }
 </style>
