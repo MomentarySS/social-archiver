@@ -39,6 +39,25 @@ function highlightEntities(escapedText, platform) {
     .replace(/(^|\s)@([A-Za-z0-9_.]+)/g, '$1<span class="entity">@$2</span>')
 }
 
+function igCarouselMarkup(slides) {
+  if (!slides.length) return ''
+  if (slides.length === 1) {
+    return `<div class="ig-media-panel"><div class="ig-slide">${slides[0]}</div></div>`
+  }
+  const panelSlides = slides.map((markup) => `<div class="ig-slide">${markup}</div>`).join('')
+  const dots = slides.map((_, index) => (
+    `<button type="button" class="ig-dot${index === 0 ? ' active' : ''}" data-index="${index}" aria-label="第 ${index + 1} 张"></button>`
+  )).join('')
+  const chevronPrev = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 9 12l5.5 6.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  const chevronNext = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5.5 15 12l-5.5 6.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  return `<div class="ig-media-shell">
+    <div class="ig-media-panel" tabindex="0">${panelSlides}</div>
+    <button type="button" class="ig-nav ig-nav-prev" aria-label="上一张">${chevronPrev}</button>
+    <button type="button" class="ig-nav ig-nav-next" aria-label="下一张">${chevronNext}</button>
+    <div class="ig-dots" role="tablist">${dots}</div>
+  </div>`
+}
+
 function postMarkup(post, { name, account, platform }) {
   const text = highlightEntities(escapeHtml(stripHtml(post.text || '')), platform).replace(/\n/g, '<br/>')
   const date = escapeHtml(formatDateForHtml(post.created_at || post.date || ''))
@@ -46,24 +65,24 @@ function postMarkup(post, { name, account, platform }) {
   const idAttr = escapeHtml(String(post.id || ''))
   const url = post.url || ''
   const media = groupLiveMedia(post.pics || []).slice(0, 9)
-  const images = media
-    .map((pic) => {
-      const still = pic.date_folder && pic.filename
-        ? `${pic.date_folder}/${pic.filename}`
+  function cellMarkup(pic) {
+    const still = pic.date_folder && pic.filename
+      ? `${pic.date_folder}/${pic.filename}`
+      : ''
+    if (!still) return ''
+    if (pic.type === 'video') {
+      return `<div class="cell"><video src="${escapeHtml(still)}" controls preload="metadata"></video></div>`
+    }
+    if (pic.type === 'livephoto') {
+      const motion = pic.date_folder && pic.video_filename
+        ? `${pic.date_folder}/${pic.video_filename}`
         : ''
-      if (!still) return ''
-      if (pic.type === 'video') {
-        return `<div class="cell"><video src="${escapeHtml(still)}" controls preload="metadata"></video></div>`
-      }
-      if (pic.type === 'livephoto') {
-        const motion = pic.date_folder && pic.video_filename
-          ? `${pic.date_folder}/${pic.video_filename}`
-          : ''
-        return `<div class="cell live"><img src="${escapeHtml(still)}" loading="lazy" />${motion ? `<video src="${escapeHtml(motion)}" muted loop playsinline preload="auto"></video>` : ''}<span class="live">LIVE</span></div>`
-      }
-      return `<div class="cell"><img src="${escapeHtml(still)}" loading="lazy" /></div>`
-    })
-    .join('')
+      return `<div class="cell live"><img src="${escapeHtml(still)}" loading="lazy" />${motion ? `<video src="${escapeHtml(motion)}" muted loop playsinline preload="auto"></video>` : ''}<span class="live">LIVE</span></div>`
+    }
+    return `<div class="cell"><img src="${escapeHtml(still)}" loading="lazy" /></div>`
+  }
+  const slides = media.map(cellMarkup).filter(Boolean)
+  const images = slides.join('')
   const count = media.length
   const mediaClass = platform === 'twitter'
     ? `images x-media n${count}`
@@ -80,12 +99,17 @@ function postMarkup(post, { name, account, platform }) {
   }
 
   if (platform === 'instagram') {
+    const mediaMarkup = igCarouselMarkup(slides)
     return `
-      <article class="post" id="post-${idAttr}" data-ts="${ts}" data-id="${idAttr}">
-        <div class="name">${escapeHtml(post.user_name || name)} <span class="handle">@${escapeHtml(post.screen_name || account)}</span> · ${date}</div>
-        ${text ? `<p class="text">${text}</p>` : ''}
-        <div class="${mediaClass}">${images}</div>
-        ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">查看原文</a>` : ''}
+      <article class="post ig-post" id="post-${idAttr}" data-ts="${ts}" data-id="${idAttr}">
+        <div class="ig-card has-media">
+          ${images ? mediaMarkup : ''}
+          <aside class="ig-side">
+            <div class="ig-head"><span class="name">${escapeHtml(post.user_name || name)}</span> <span class="handle">@${escapeHtml(post.screen_name || account)}</span></div>
+            ${text ? `<div class="ig-caption"><strong>${escapeHtml(post.user_name || name)}</strong> ${text}</div>` : '<p class="ig-caption-empty">无配文</p>'}
+            <div class="meta">${date}${url ? ` · <a href="${escapeHtml(url)}" target="_blank" rel="noopener">查看原文</a>` : ''}</div>
+          </aside>
+        </div>
       </article>`
   }
 
@@ -196,6 +220,28 @@ function archivePageHtml({ userName, handle, platform, body, count, theme }) {
   .images.n1 { grid-template-columns: 1fr; max-width: 260px; }
   .images.n2, .images.n4 { grid-template-columns: 1fr 1fr; }
   .images.n3, .images.n5, .images.n6, .images.n7, .images.n8, .images.n9 { grid-template-columns: 1fr 1fr 1fr; }
+  .ig-post { padding: 0; }
+  .ig-card { display: flex; min-height: 320px; max-height: 520px; }
+  .ig-media-shell { position: relative; flex: 1.15; min-width: 0; background: #000; }
+  .ig-media-panel { flex: 1.15; min-width: 0; background: #000; display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+  .ig-media-panel::-webkit-scrollbar { display: none; }
+  .ig-media-shell .ig-media-panel { flex: 1; width: 100%; }
+  .ig-slide { flex: 0 0 100%; scroll-snap-align: start; aspect-ratio: 1; }
+  .ig-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 30px; height: 30px; border: 0; border-radius: 50%; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,.92); color: #262626; cursor: pointer; }
+  .ig-nav svg { width: 18px; height: 18px; }
+  .ig-nav-prev { left: 12px; }
+  .ig-nav-next { right: 12px; }
+  .ig-nav[hidden] { display: none; }
+  .ig-dots { position: absolute; left: 0; right: 0; bottom: 12px; display: flex; justify-content: center; gap: 4px; z-index: 2; }
+  .ig-dot { width: 6px; height: 6px; border: 0; border-radius: 50%; padding: 0; background: rgba(255,255,255,.45); cursor: pointer; }
+  .ig-dot.active { background: #0095f6; }
+  .ig-side { flex: 0.85; min-width: 180px; max-width: 240px; border-left: 1px solid var(--hairline); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .ig-head .name { display: block; font-size: 14px; }
+  .ig-head .handle { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); font-weight: 400; }
+  .ig-caption { font-size: 14px; line-height: 1.55; flex: 1; overflow-y: auto; }
+  .ig-caption strong { margin-right: 6px; }
+  .ig-caption-empty { margin: 0; color: var(--muted); font-size: 13px; }
+  .ig-media-panel .cell, .ig-slide .cell { aspect-ratio: 1; max-width: none; }
   .images.x-media { gap: 2px; max-width: 510px; border: 1px solid var(--hairline); border-radius: 16px; overflow: hidden; }
   .cell { aspect-ratio: 1; background: var(--media); overflow: hidden; position: relative; }
   .images.x-media .cell { aspect-ratio: auto; min-height: 140px; }
@@ -348,6 +394,45 @@ function archiveLightbox() {
   }
   scrollToHash();
   window.addEventListener('hashchange', scrollToHash);
+
+  function initIgCarousels() {
+    document.querySelectorAll('.ig-media-shell').forEach(function (shell) {
+      var panel = shell.querySelector('.ig-media-panel');
+      var slideEls = panel ? panel.querySelectorAll('.ig-slide') : [];
+      var dots = shell.querySelectorAll('.ig-dot');
+      var prev = shell.querySelector('.ig-nav-prev');
+      var next = shell.querySelector('.ig-nav-next');
+      if (!panel || slideEls.length < 2) return;
+      var index = 0;
+      function syncChrome(nextIndex) {
+        index = nextIndex;
+        dots.forEach(function (dot, dotIndex) {
+          dot.classList.toggle('active', dotIndex === index);
+        });
+        if (prev) prev.hidden = index <= 0;
+        if (next) next.hidden = index >= slideEls.length - 1;
+      }
+      function goTo(nextIndex, smooth) {
+        var target = Math.max(0, Math.min(slideEls.length - 1, nextIndex));
+        panel.scrollTo({ left: target * panel.clientWidth, behavior: smooth ? 'smooth' : 'auto' });
+        syncChrome(target);
+      }
+      if (prev) prev.addEventListener('click', function () { goTo(index - 1, true); });
+      if (next) next.addEventListener('click', function () { goTo(index + 1, true); });
+      dots.forEach(function (dot) {
+        dot.addEventListener('click', function () {
+          goTo(Number(dot.getAttribute('data-index')) || 0, true);
+        });
+      });
+      panel.addEventListener('scroll', function () {
+        var width = panel.clientWidth || 1;
+        var nextIndex = Math.round(panel.scrollLeft / width);
+        if (nextIndex !== index) syncChrome(nextIndex);
+      }, { passive: true });
+      goTo(0, false);
+    });
+  }
+  initIgCarousels();
 })();
 </script>`
 }

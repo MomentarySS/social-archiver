@@ -6,6 +6,7 @@ from backend.gallery_dl_runner import (
     looks_like_path,
     normalize_concurrent,
 )
+from backend.gallery_dl_runner import _fatal_gallery_dl_message
 
 
 class GalleryDlRunnerTests(unittest.TestCase):
@@ -25,11 +26,23 @@ class GalleryDlRunnerTests(unittest.TestCase):
         stats = GalleryDlStats()
         self.assertEqual(stats.total, 0)
         self.assertIsNone(stats.fatal_msg)
+        self.assertEqual(stats.error_lines, [])
 
     def test_normalize_concurrent_caps_at_five(self):
         self.assertEqual(normalize_concurrent(3), 3)
         self.assertEqual(normalize_concurrent(10), 5)
         self.assertEqual(normalize_concurrent(0), 1)
+
+    def test_fatal_message_includes_exit_code_and_error_lines(self):
+        msg = _fatal_gallery_dl_message(16, ["[twitter][error] boom"], "fallback")
+        self.assertIn("退出码 16", msg)
+        self.assertIn("boom", msg)
+        self.assertNotIn("未知", msg)
+
+    def test_fatal_message_falls_back_without_error_lines(self):
+        msg = _fatal_gallery_dl_message(1, [], "请重新登录 X")
+        self.assertIn("退出码 1", msg)
+        self.assertIn("请重新登录 X", msg)
 
 
 if __name__ == "__main__":

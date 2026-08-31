@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { applySettingsPatch } = require('../settings-merge');
+const { hasUsableCookie } = require('./cookie-rules');
 const {
   getDataDir,
   getSettingsPath,
@@ -53,20 +54,23 @@ function createSettingsStore(ctx) {
     return run;
   }
 
-  async function persistWeiboCookieFromJob(platform, userId, cookie) {
-    if (platform !== 'weibo') return;
+  async function persistJobCookie(platform, userId, cookie) {
     const value = String(cookie || '').trim();
-    if (!value || !value.includes('SUB=')) return;
+    if (!platform || !hasUsableCookie(platform, value)) return;
     try {
       await saveSettingsPatch({
         cookies: {
-          weibo: value,
-          per_user: { [`${platform}:${userId}`]: value },
+          [platform]: value,
+          per_user: userId ? { [`${platform}:${userId}`]: value } : {},
         },
       });
     } catch (e) {
-      console.error('保存微博 Cookie 失败:', e);
+      console.error('保存任务 Cookie 失败:', e);
     }
+  }
+
+  async function persistWeiboCookieFromJob(platform, userId, cookie) {
+    return persistJobCookie(platform, userId, cookie);
   }
 
   function getProxyUrl() {
@@ -79,6 +83,7 @@ function createSettingsStore(ctx) {
     writeSettingsFile,
     saveSettingsPatch,
     persistWeiboCookieFromJob,
+    persistJobCookie,
     getProxyUrl,
     getDataDir,
     getSettingsPath,

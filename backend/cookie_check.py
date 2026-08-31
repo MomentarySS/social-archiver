@@ -98,44 +98,80 @@ def check_twitter_cookie(cookie: str) -> Dict:
         return _result(False, f"网络错误: {e}")
 
 
-def check_instagram_cookie(cookie: str) -> Dict:
+def _parse_cookie_map(cookie: str) -> Dict[str, str]:
     cookie = (cookie or "").strip()
-    sessionid = ""
+    result: Dict[str, str] = {}
+    if not cookie:
+        return result
+    if "=" not in cookie and ";" not in cookie:
+        result["sessionid"] = cookie
+        return result
     for part in cookie.split(";"):
         part = part.strip()
-        if part.lower().startswith("sessionid="):
-            sessionid = part.split("=", 1)[1].strip()
-    if not sessionid and "=" not in cookie and ";" not in cookie:
-        sessionid = cookie
-    if not sessionid:
-        return _result(False, "需要 sessionid")
+        if not part or "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key and value:
+            result[key] = value
+    return result
+
+
+def _instagram_request_headers(cookie_map: Dict[str, str]) -> Dict[str, str]:
+    sessionid = cookie_map.get("sessionid", "")
+    cookie_header = "; ".join(f"{key}={value}" for key, value in cookie_map.items())
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         ),
-        "Cookie": f"sessionid={sessionid}",
+        "Cookie": cookie_header or f"sessionid={sessionid}",
         "X-IG-App-ID": "936619743392459",
+        "Referer": "https://www.instagram.com/",
+        "X-Requested-With": "XMLHttpRequest",
     }
+    csrftoken = cookie_map.get("csrftoken")
+    if csrftoken:
+        headers["X-CSRFToken"] = csrftoken
+    return headers
+
+
+def check_instagram_cookie(cookie: str) -> Dict:
+    cookie_map = _parse_cookie_map(cookie)
+    sessionid = cookie_map.get("sessionid", "")
+    if not sessionid:
+        return _result(False, "需要 sessionid")
+    headers = _instagram_request_headers(cookie_map)
     try:
         resp = requests.get(
-            "https://www.instagram.com/api/v1/accounts/current_user/",
+            "https://www.instagram.com/api/v1/accounts/current_user/?edit=true",
             headers=headers,
             timeout=15,
         )
         if resp.status_code == 200:
-            data = resp.json()
+            text = (resp.text or "").strip()
+            if not text:
+                return _result(False, "Instagram 返回空响应，sessionid 可能已失效或被限流")
+            try:
+                data = resp.json()
+            except ValueError:
+                return _result(False, "Instagram 返回异常内容，sessionid 可能已失效")
             user = {}
             if isinstance(data, dict):
                 raw_user = data.get("user")
                 user = raw_user if isinstance(raw_user, dict) else {}
             if user.get("username"):
                 return _result(True, f"Cookie 有效（@{user.get('username')}）")
-            return _result(True, "Cookie 有效")
+            if isinstance(data, dict) and data.get("status") == "ok":
+                return _result(True, "Cookie 有效")
+            return _result(False, "sessionid 可能已失效，请重新登录")
         if resp.status_code in (401, 403):
             return _result(False, "sessionid 已失效，请重新登录")
         return _result(False, f"校验失败（HTTP {resp.status_code}）")
     except requests.exceptions.RequestException as e:
+        if isinstance(e, requests.exceptions.JSONDecodeError):
+            return _result(False, "Instagram 返回异常内容，sessionid 可能已失效")
         return _result(False, f"网络错误: {e}")
 
 

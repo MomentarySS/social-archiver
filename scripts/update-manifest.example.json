@@ -1,6 +1,6 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "notesUrl": "https://example.com/social-archiver/CHANGELOG.html",
-  "zipUrl": "https://example.com/social-archiver/SocialArchiver-1.2.0-win.zip",
-  "releaseNotes": "Phase 7：日历导航、话题筛选、批量失败退避；设置页检查更新。"
+  "zipUrl": "https://example.com/social-archiver/SocialArchiver-1.2.1-win.zip",
+  "releaseNotes": "修复 X 换用户 ct0、IG 离线轮播与 Edge 导入 per_user 同步；Instagram 分栏浏览卡。"
 }

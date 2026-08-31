@@ -244,6 +244,9 @@
         <button class="sa-btn sa-btn-ghost" type="button" :disabled="checkingCookies" @click="checkAllCookies">
           {{ checkingCookies ? '检测中…' : '检测全部 Cookie' }}
         </button>
+        <button class="sa-btn sa-btn-ghost" type="button" :disabled="importingCookies" @click="importAllFromEdge">
+          {{ importingCookies ? '导入中…' : '从 Edge 导入' }}
+        </button>
       </div>
 
       <div v-for="row in platformRows" :key="row.key" class="cookie-card">
@@ -342,6 +345,7 @@ const loggingKey = ref('')
 const verifying = ref(false)
 const rebuildingIndex = ref(false)
 const checkingCookies = ref(false)
+const importingCookies = ref(false)
 const probingFfmpeg = ref(false)
 const transcoding = ref(false)
 const generatingPosters = ref(false)
@@ -641,6 +645,34 @@ async function checkAllCookies() {
     toast.error('Cookie 检测失败')
   } finally {
     checkingCookies.value = false
+  }
+}
+
+async function importAllFromEdge() {
+  if (!window.electronAPI?.importBrowserCookies) return
+  importingCookies.value = true
+  try {
+    const res = await window.electronAPI.importBrowserCookies({ browser: 'edge' })
+    if (!res.success) {
+      toast.error(res.error || '从 Edge 导入失败')
+      return
+    }
+    await loadSettings()
+    const imports = res.imports || []
+    const valid = imports.filter((item) => item.valid).length
+    const total = imports.filter((item) => item.cookie).length
+    if (!total) {
+      toast.warning('未在 Edge 中找到任何平台登录 Cookie')
+      return
+    }
+    if (valid === total) toast.success(`已从 Edge 导入 ${total} 个平台 Cookie，校验通过`)
+    else if (valid > 0) toast.warning(`已导入 ${total} 个平台，其中 ${valid} 个校验通过`)
+    else toast.warning('已导入 Cookie，但校验均未通过，请重新登录')
+    await checkAllCookies()
+  } catch (e) {
+    toast.error('从 Edge 导入失败')
+  } finally {
+    importingCookies.value = false
   }
 }
 

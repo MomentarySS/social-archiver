@@ -1,7 +1,7 @@
 {
   "name": "social-archiver",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "main": "electron-main.js",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,7 @@
     "version:print": "node scripts/print-version.mjs",
     "electron:dev:inner": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron --disable-gpu --disable-features=WebGL,WebGL2,WebGLRenderingContext .\"",
     "electron:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/electron-dev.ps1",
-    "electron:build": "python scripts/write_icon.py && npm run build && python scripts/build_backend.py && electron-builder --win"
+    "electron:build": "python scripts/write_icon.py && npm run build && python scripts/build_backend.py && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/electron-build.ps1"
   },
   "dependencies": {
     "vue": "^3.5.13"
@@ -38,6 +38,7 @@
   "build": {
     "appId": "com.social-archiver.app",
     "productName": "Social Archiver",
+    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "dist-electron"
     },

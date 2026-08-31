@@ -1,4 +1,9 @@
 const { ipcMain } = require('electron');
+const {
+  applyBrowserCookieImports,
+  readInstagramSessionFromPartition,
+  refreshInstagramCookie,
+} = require('../cookie-sources');
 
 function registerMaintenanceIpc({ settingsStore, backend }) {
   const { rememberAssetRoot } = settingsStore;
@@ -92,6 +97,40 @@ function registerMaintenanceIpc({ settingsStore, backend }) {
       return { valid: false, message: e.message };
     }
   });
+
+  ipcMain.handle('import-browser-cookies', async (_event, { browser = 'edge', platform } = {}) => {
+    try {
+      const args = ['--import-browser-cookies', '--browser', browser];
+      if (platform) args.push('--platform', platform);
+      const events = await runBackendJsonLines(args, { platform: platform || 'instagram' });
+      const imports = events
+        .filter((e) => e.type === 'browser-cookie-import')
+        .map((e) => ({
+          platform: e.platform,
+          cookie: e.cookie || '',
+          valid: Boolean(e.valid),
+          message: e.message || '',
+        }));
+      const err = events.find((e) => e.type === 'error');
+      if (!imports.length && err) {
+        return { success: false, error: err.msg, browser, imports: [] };
+      }
+      await applyBrowserCookieImports(settingsStore, imports.filter((item) => item.cookie));
+      return { success: true, browser, imports };
+    } catch (e) {
+      return { success: false, error: e.message, browser, imports: [] };
+    }
+  });
+
+  ipcMain.handle('refresh-instagram-session', async (_event, { userId } = {}) => {
+    try {
+      return await refreshInstagramCookie(settingsStore, userId || '');
+    } catch (e) {
+      return { refreshed: false, cookie: '', message: e.message };
+    }
+  });
+
+  ipcMain.handle('read-instagram-session-partition', async () => readInstagramSessionFromPartition());
 }
 
 module.exports = { registerMaintenanceIpc };

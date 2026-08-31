@@ -35,6 +35,9 @@
         <button class="sa-btn sa-btn-primary" type="button" :disabled="loggingIn" @click="handleTwitterLogin">
           {{ loggingIn ? '登录中…' : '应用内登录 X' }}
         </button>
+        <button class="sa-btn sa-btn-ghost" type="button" :disabled="loggingIn" @click="importCurrentFromEdge">
+          从 Edge 导入
+        </button>
         <button
           class="sa-btn sa-btn-ghost"
           type="button"
@@ -66,6 +69,12 @@
         <button class="sa-btn sa-btn-primary" type="button" :disabled="loggingIn" @click="handleInstagramLogin">
           {{ loggingIn ? '登录中…' : '应用内登录 Instagram' }}
         </button>
+        <button class="sa-btn sa-btn-ghost" type="button" :disabled="loggingIn" @click="refreshInstagramPartition">
+          刷新应用内登录
+        </button>
+        <button class="sa-btn sa-btn-ghost" type="button" :disabled="loggingIn" @click="importCurrentFromEdge">
+          从 Edge 导入
+        </button>
         <button
           class="sa-btn sa-btn-ghost"
           type="button"
@@ -94,6 +103,9 @@
         <button class="sa-btn sa-btn-primary" type="button" :disabled="loggingIn" @click="handleWeiboLogin">
           {{ loggingIn ? '登录中…' : '应用内登录微博' }}
         </button>
+        <button class="sa-btn sa-btn-ghost" type="button" :disabled="loggingIn" @click="importCurrentFromEdge">
+          从 Edge 导入
+        </button>
         <button
           class="sa-btn sa-btn-ghost"
           type="button"
@@ -112,6 +124,7 @@
 import { computed, ref, watch } from 'vue'
 import { useToast } from '../composables/useToast'
 import { savePlatformCookie } from '../utils/session.js'
+import type { BrowserCookieImportItem } from '../electron-api.d.ts'
 
 const props = defineProps<{
   modelValue: string
@@ -189,9 +202,15 @@ function emitTwitterCookie() {
 }
 
 function emitInstagramCookie() {
-  const parts: string[] = []
-  if (sessionid.value.trim()) parts.push(`sessionid=${sessionid.value.trim()}`)
-  emit('update:modelValue', parts.join('; '))
+  const parsed = parseCookieMap(props.modelValue || '')
+  if (sessionid.value.trim()) parsed.sessionid = sessionid.value.trim()
+  else delete parsed.sessionid
+  emit(
+    'update:modelValue',
+    Object.entries(parsed)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('; '),
+  )
 }
 
 function onChange(value: string) {
@@ -204,11 +223,6 @@ async function handleWeiboLogin() {
     if (window.electronAPI) {
       const res = await window.electronAPI.weiboLogin()
       if (res.success && res.cookie) {
-        const check = await window.electronAPI.checkCookie({ platform: 'weibo', cookie: res.cookie })
-        if (!check.valid) {
-          toast.error(check.message || '微博 Cookie 仍未处于登录状态')
-          return
-        }
         emit('update:modelValue', res.cookie)
         await savePlatformCookie('weibo', res.cookie)
         toast.success('微博登录成功，Cookie 已保存')
@@ -258,6 +272,59 @@ async function handleInstagramLogin() {
     }
   } catch (e) {
     toast.error('登录失败。请手动把 sessionid 填到上方')
+  } finally {
+    loggingIn.value = false
+  }
+}
+
+function applyImportedCookie(item: BrowserCookieImportItem) {
+  if (!item.cookie) return
+  emit('update:modelValue', item.cookie)
+}
+
+async function importCurrentFromEdge() {
+  if (!window.electronAPI?.importBrowserCookies) return
+  loggingIn.value = true
+  try {
+    const res = await window.electronAPI.importBrowserCookies({
+      browser: 'edge',
+      platform: props.platform,
+    })
+    if (!res.success) {
+      toast.error(res.error || '从 Edge 导入失败')
+      return
+    }
+    const item = res.imports?.find((row) => row.platform === props.platform)
+    if (!item?.cookie) {
+      toast.warning(item?.message || '未在 Edge 中找到该平台登录 Cookie')
+      return
+    }
+    applyImportedCookie(item)
+    await savePlatformCookie(props.platform, item.cookie)
+    if (item.valid) toast.success(item.message || '已从 Edge 导入并校验通过')
+    else toast.warning(item.message || '已导入，但校验未通过')
+  } catch (e) {
+    toast.error('从 Edge 导入失败')
+  } finally {
+    loggingIn.value = false
+  }
+}
+
+async function refreshInstagramPartition() {
+  if (!window.electronAPI?.refreshInstagramSession) return
+  loggingIn.value = true
+  try {
+    const res = await window.electronAPI.refreshInstagramSession()
+    if (!res.refreshed || !res.cookie) {
+      toast.warning(res.message || '未能从应用内登录分区读取 sessionid')
+      return
+    }
+    emit('update:modelValue', res.cookie)
+    const check = await window.electronAPI.checkCookie({ platform: 'instagram', cookie: res.cookie })
+    if (check.valid) toast.success(check.message || '已刷新 Instagram sessionid')
+    else toast.warning(check.message || '已刷新，但校验未通过')
+  } catch (e) {
+    toast.error('刷新应用内登录失败')
   } finally {
     loggingIn.value = false
   }

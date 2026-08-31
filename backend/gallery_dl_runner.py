@@ -109,6 +109,29 @@ def build_gallery_dl_config(
     return config
 
 
+def apply_gallery_dl_downloader_antirate(
+    config: Dict,
+    concurrent: int,
+    *,
+    max_threads: int = 2,
+    retries: int = 8,
+    sleep_429: int = 60,
+) -> None:
+    """Slow down gallery-dl downloads and wait on HTTP 429 (see gallery-dl docs)."""
+    downloader = config.setdefault("downloader", {})
+    downloader["retries"] = max(int(downloader.get("retries") or 3), retries)
+    downloader["sleep-429"] = sleep_429
+    downloader["threads"] = max(1, min(normalize_concurrent(concurrent), max_threads))
+
+
+def apply_twitter_extractor_antirate(cfg: Dict) -> None:
+    """gallery-dl #5775: randomized sleep + ratelimit wait reduces X lockouts."""
+    cfg["sleep"] = "1.5-4.0"
+    cfg["sleep-request"] = "6.0-12.0"
+    cfg["sleep-429"] = 60
+    cfg["ratelimit"] = "wait:300"
+
+
 def write_gallery_dl_config(config: Dict, prefix: str = "social-archiver-gdl-") -> str:
     fd, config_path = tempfile.mkstemp(prefix=prefix, suffix=".json")
     os.close(fd)
@@ -131,6 +154,11 @@ class GalleryDlStats:
     total: int = 0
     skipped: int = 0
     fatal_msg: Optional[str] = None
+    error_lines: Optional[List[str]] = None
+
+    def __post_init__(self):
+        if self.error_lines is None:
+            self.error_lines = []
 
 
 def iter_gallery_dl_download(
@@ -170,6 +198,10 @@ def iter_gallery_dl_download(
                 }
                 yield {"type": "status", "msg": f"已下载: {filename}"}
                 continue
+            if _looks_like_gallery_dl_error(lowered):
+                stats.error_lines.append(line)
+                if len(stats.error_lines) > 8:
+                    stats.error_lines = stats.error_lines[-8:]
             mapped = map_error(line)
             if mapped:
                 stats.fatal_msg = mapped
@@ -180,8 +212,10 @@ def iter_gallery_dl_download(
 
         process.wait()
         if not stats.fatal_msg and process.returncode not in (0, None) and stats.total == 0:
-            stats.fatal_msg = fatal_empty_msg
-            yield {"type": "error", "msg": fatal_empty_msg}
+            stats.fatal_msg = _fatal_gallery_dl_message(
+                process.returncode, stats.error_lines, fatal_empty_msg
+            )
+            yield {"type": "error", "msg": stats.fatal_msg}
         elif process.returncode not in (0, None) and stats.total > 0:
             yield {
                 "type": "status",
@@ -190,3 +224,29 @@ def iter_gallery_dl_download(
     except Exception as e:
         stats.fatal_msg = str(e)
         yield {"type": "error", "msg": str(e)}
+
+
+def _looks_like_gallery_dl_error(lowered: str) -> bool:
+    return any(
+        token in lowered
+        for token in (
+            "[error]",
+            "error:",
+            "exception",
+            "abort",
+            "unauthorized",
+            "authrequired",
+            "authentication",
+        )
+    )
+
+
+def _fatal_gallery_dl_message(
+    returncode: int,
+    error_lines: Optional[List[str]],
+    fallback: str,
+) -> str:
+    detail = "；".join(line.strip() for line in (error_lines or [])[-4:] if line.strip())
+    if detail:
+        return f"gallery-dl 失败（退出码 {returncode}）。{detail}"
+    return f"gallery-dl 失败（退出码 {returncode}）。{fallback}"

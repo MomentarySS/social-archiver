@@ -137,7 +137,8 @@ import DownloadProgress from '../components/DownloadProgress.vue'
 import LogPanel from '../components/LogPanel.vue'
 import { writeArchiveHtml } from '../utils/archiveHtml.js'
 import { appPlatform, setAppPlatform } from '../theme.js'
-import { cookieForPlatform, hasUsableCookie, savePlatformCookie, saveUserCookie } from '../utils/session.js'
+import { cookieForPlatform, cookieForUser, hasUsableCookie, savePlatformCookie, saveUserCookie } from '../utils/session.js'
+import { normalizeUserId, hasInvalidHandleChars } from '../utils/userId.js'
 import { useToast } from '../composables/useToast'
 import type { DownloadEvent, ErrorResult, LogEvent } from '../electron-api.d.ts'
 
@@ -216,8 +217,26 @@ async function selectOutputDir() {
   }
 }
 
+async function ensureCookieLoaded(account: string) {
+  if (!window.electronAPI) return
+  if (hasUsableCookie(platform.value, cookie.value)) return
+  const settings = await window.electronAPI.getSettings()
+  const stored =
+    cookieForUser(settings, platform.value, account) ||
+    cookieForPlatform(settings, platform.value)
+  if (stored) {
+    cookie.value = stored
+    cookieByPlatform.value[cookieKeyFor(platform.value)] = stored
+  }
+}
+
 async function handleDownload() {
-  if (!user_id.value.trim()) {
+  const account = normalizeUserId(user_id.value, platform.value)
+  if (account !== user_id.value) {
+    user_id.value = account
+  }
+
+  if (!account) {
     toast.warning('请输入用户ID')
     return
   }
@@ -227,8 +246,10 @@ async function handleDownload() {
     return
   }
 
+  await ensureCookieLoaded(account)
+
   if (platform.value === 'twitter' && !hasUsableCookie('twitter', cookie.value)) {
-    toast.warning('请填写 auth_token。可点「应用内登录 X」，或从 x.com 的 Cookie 里单独复制。')
+    toast.warning('请填写 auth_token 和 ct0。可点「应用内登录 X」，或从 x.com 的 Cookie 里复制。')
     return
   }
 
@@ -242,6 +263,11 @@ async function handleDownload() {
     return
   }
 
+  if (hasInvalidHandleChars(account, platform.value)) {
+    toast.warning('用户名不能含空格，请使用下划线 _（如 taeyeon_ss）')
+    return
+  }
+
   // Reset state
   progress.value = null
   result.value = null
@@ -250,16 +276,15 @@ async function handleDownload() {
   isDownloading.value = true
   logs.value = []
 
-  addLog(`开始缓存${platform.value === 'twitter' ? '推特' : platform.value === 'instagram' ? 'Instagram' : '微博'}用户：${user_id.value}`, 'info')
+  addLog(`开始缓存${platform.value === 'twitter' ? '推特' : platform.value === 'instagram' ? 'Instagram' : '微博'}用户：${account}`, 'info')
   await persistOutputDir(output_dir.value)
-  await savePlatformCookie(platform.value, cookie.value)
-  await saveUserCookie(platform.value, user_id.value.trim(), cookie.value)
+  await saveUserCookie(platform.value, account, cookie.value)
 
   try {
     if (window.electronAPI) {
       const res = await window.electronAPI.startDownload({
         platform: platform.value,
-        userId: user_id.value,
+        userId: account,
         cookie: cookie.value,
         outputDir: output_dir.value,
         startDate: startDate.value || null,
@@ -351,6 +376,12 @@ async function refreshOfflinePage(userDir?: string) {
 }
 
 async function handleDownloadEvent(event: DownloadEvent) {
+  if ('cookie' in event && event.cookie && (platform.value === 'weibo' || platform.value === 'twitter')) {
+    skipCookieAutosave = true
+    cookie.value = event.cookie
+    cookieByPlatform.value[cookieKeyFor(platform.value)] = event.cookie
+    skipCookieAutosave = false
+  }
   // Discriminated union: narrowing via event.type directly
   if (event.type === 'progress') {
     progress.value = {
@@ -441,8 +472,38 @@ function cookieKeyFor(value: string): 'twitter' | 'weibo' | 'instagram' {
   return 'twitter'
 }
 
+let cookieSaveTimer: ReturnType<typeof setTimeout> | null = null
+let pendingCookieSave: { platform: string; value: string } | null = null
+let skipCookieAutosave = false
+
+function schedulePlatformCookieSave(plat: string, value: string) {
+  pendingCookieSave = { platform: plat, value }
+  if (cookieSaveTimer) clearTimeout(cookieSaveTimer)
+  cookieSaveTimer = setTimeout(() => {
+    cookieSaveTimer = null
+    const pending = pendingCookieSave
+    pendingCookieSave = null
+    if (!pending || !settingsReady.value) return
+    void savePlatformCookie(pending.platform, pending.value)
+  }, 600)
+}
+
+function flushPlatformCookieSave() {
+  if (cookieSaveTimer) {
+    clearTimeout(cookieSaveTimer)
+    cookieSaveTimer = null
+  }
+  const pending = pendingCookieSave
+  pendingCookieSave = null
+  if (!pending || !settingsReady.value) return
+  void savePlatformCookie(pending.platform, pending.value)
+}
+
 watch(cookie, (value) => {
-  cookieByPlatform.value[cookieKeyFor(platform.value)] = value
+  const plat = platform.value
+  cookieByPlatform.value[cookieKeyFor(plat)] = value
+  if (!settingsReady.value || skipCookieAutosave) return
+  schedulePlatformCookieSave(plat, value)
 })
 
 watch(platform, async (value) => {
@@ -454,6 +515,7 @@ watch(platform, async (value) => {
 })
 
 onUnmounted(() => {
+  flushPlatformCookieSave()
   cleanupFns.forEach(fn => fn())
 })
 </script>

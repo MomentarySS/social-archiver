@@ -17,6 +17,8 @@ npm.cmd run release:pack
 
 等价于：`release:check`（`npm test` + `npm run build`）通过后执行 `electron:build`。
 
+`electron:build` 复用 `node_modules/electron/dist`，不重复从 GitHub 下 Electron；NSIS 等工具走 npmmirror 镜像（见 `scripts/electron-build.ps1`）。需先 `npm install` 装好 dev 依赖。
+
 仅做自检、不打 zip：
 
 ```bat
@@ -50,9 +52,9 @@ npm.cmd run version:print
 
 ```json
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "notesUrl": "https://你的站点/CHANGELOG.html",
-  "zipUrl": "https://你的站点/SocialArchiver-1.2.0-win.zip"
+  "zipUrl": "https://你的站点/SocialArchiver-1.2.1-win.zip"
 }
 ```
 

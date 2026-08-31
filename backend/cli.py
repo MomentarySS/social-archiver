@@ -126,6 +126,8 @@ def main():
     parser.add_argument("--include-likes", action="store_true", help="X：同时缓存该用户点赞时间线")
     parser.add_argument("--verify", action="store_true", help="校验存档完整性")
     parser.add_argument("--check-cookie", action="store_true", help="预检 Cookie 是否有效")
+    parser.add_argument("--import-browser-cookies", action="store_true", help="从浏览器导入 Cookie")
+    parser.add_argument("--browser", default="edge", help="浏览器：edge / chrome / firefox / brave 等")
     parser.add_argument("--batch-config", default="", help="批处理 JSON 配置文件")
     parser.add_argument("--probe-ffmpeg", action="store_true", help="检测系统 ffmpeg 是否可用")
     parser.add_argument("--transcode", action="store_true", help="将 HEVC 视频转码为 H.264")
@@ -241,6 +243,22 @@ def main():
         result = check_cookie(args.platform, cookie)
         _emit({"type": "cookie-check", **result})
         sys.exit(0 if result.get("valid") else 1)
+
+    if args.import_browser_cookies:
+        from backend.browser_cookies import import_browser_cookies
+        result = import_browser_cookies(args.browser, args.platform or None)
+        if not result.get("ok"):
+            _emit({"type": "error", "msg": result.get("error") or "导入失败"})
+            sys.exit(1)
+        for platform_name, row in (result.get("results") or {}).items():
+            _emit({
+                "type": "browser-cookie-import",
+                "platform": platform_name,
+                "cookie": row.get("cookie") or "",
+                "valid": bool(row.get("valid")),
+                "message": row.get("message") or "",
+            })
+        sys.exit(0)
 
     if args.verify:
         if not args.output_dir:

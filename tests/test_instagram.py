@@ -49,6 +49,72 @@ class InstagramCarouselTests(unittest.TestCase):
             self.assertEqual(saved["pics"][0]["filename"], "1000/1001.jpg")
             self.assertEqual(saved["pics"][0]["date_folder"], "2024-01-01")
 
+    def test_normalize_carousel_groups_flat_windows_media(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            user_id = "demo"
+            user_dir = os.path.join(tmp, user_id)
+            date_dir = os.path.join(user_dir, "2026-08-24")
+            posts_dir = os.path.join(user_dir, "_posts", "2026-08-24")
+            os.makedirs(date_dir)
+            os.makedirs(posts_dir)
+
+            sidecar_id = "3970550756822463793"
+            slide_ids = ("3970549645636984626", "3970549657590595879", "3970549661273414404")
+            for slide_id in slide_ids:
+                filename = f"{sidecar_id}_{slide_id}.jpg"
+                with open(os.path.join(date_dir, filename), "wb") as handle:
+                    handle.write(b"\xff\xd8\xff" + b"\x00" * 128)
+                stale = os.path.join(posts_dir, f"{sidecar_id}_{slide_id}.json")
+                with open(stale, "w", encoding="utf-8") as handle:
+                    json.dump({
+                        "id": f"{sidecar_id}_{slide_id}",
+                        "platform": "instagram",
+                        "user_id": user_id,
+                        "pics": [{"filename": filename, "date_folder": "2026-08-24"}],
+                    }, handle)
+
+            with open(os.path.join(date_dir, f"{sidecar_id}.json"), "w", encoding="utf-8") as handle:
+                json.dump({
+                    "post_id": sidecar_id,
+                    "sidecar_media_id": sidecar_id,
+                    "post_shortcode": "DcaOuBfD7Ux",
+                    "description": "carousel caption",
+                    "date": "2026-08-24 04:42:36",
+                    "count": 3,
+                    "username": "demo",
+                    "fullname": "Demo User",
+                }, handle)
+
+            with open(os.path.join(posts_dir, f"{sidecar_id}.json"), "w", encoding="utf-8") as handle:
+                json.dump({
+                    "id": sidecar_id,
+                    "platform": "instagram",
+                    "user_id": user_id,
+                    "kind": "carousel",
+                    "carousel_count": 3,
+                    "pics": [],
+                    "text": "carousel caption",
+                    "date": "2026-08-24",
+                }, handle)
+
+            count = _normalize_instagram_archive(tmp, user_id)
+            self.assertEqual(count, 1)
+
+            remaining = sorted(
+                name for name in os.listdir(posts_dir) if name.endswith(".json")
+            )
+            self.assertEqual(remaining, [f"{sidecar_id}.json"])
+
+            with open(os.path.join(posts_dir, f"{sidecar_id}.json"), encoding="utf-8") as handle:
+                saved = json.load(handle)
+
+            self.assertEqual(saved["kind"], "carousel")
+            self.assertEqual(saved["carousel_count"], 3)
+            self.assertEqual(saved["text"], "carousel caption")
+            self.assertEqual(len(saved["pics"]), 3)
+            self.assertEqual(saved["pics"][0]["filename"], f"{sidecar_id}_{slide_ids[0]}.jpg")
+            self.assertEqual(saved["pics"][0]["media_id"], slide_ids[0])
+
     def test_normalize_single_media_post(self):
         with tempfile.TemporaryDirectory() as tmp:
             user_id = "demo"
@@ -100,6 +166,38 @@ class InstagramCarouselTests(unittest.TestCase):
         _apply_instagram_payload(post, {"type": "story", "description": "story text"}, "demo")
         self.assertEqual(post["kind"], "story")
         self.assertEqual(post["text"], "story text")
+
+
+class InstagramGalleryDlErrorTests(unittest.TestCase):
+    def test_story_not_found_is_not_user_error(self):
+        from backend.instagram import _map_gallery_dl_error
+
+        self.assertIsNone(_map_gallery_dl_error("Requested story could not be found"))
+
+    def test_http_404_is_not_user_error(self):
+        from backend.instagram import _map_gallery_dl_error
+
+        self.assertIsNone(
+            _map_gallery_dl_error("'404 Not Found' for 'https://www.instagram.com/api/v1/clips/user/'"),
+        )
+
+    def test_user_not_found_maps_message(self):
+        from backend.instagram import _map_gallery_dl_error
+
+        mapped = _map_gallery_dl_error("Requested user could not be found")
+        self.assertIn("找不到该用户", mapped or "")
+
+    def test_rate_limit_does_not_abort_download(self):
+        from backend.instagram import _map_gallery_dl_line
+
+        state = {"rate_limited": False}
+        self.assertIsNone(_map_gallery_dl_line("'429 Too Many Requests' for 'https://i.instagram.com/…'", state))
+        self.assertTrue(state["rate_limited"])
+
+    def test_rate_limit_not_mapped_as_fatal_error(self):
+        from backend.instagram import _map_gallery_dl_error
+
+        self.assertIsNone(_map_gallery_dl_error("'429 Too Many Requests' for 'https://i.instagram.com/…'"))
 
 
 if __name__ == "__main__":
