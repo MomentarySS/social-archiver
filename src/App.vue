@@ -33,7 +33,7 @@
 
     <main class="app-body">
       <HomeView v-show="activeTab === 'download'" />
-      <BrowseView v-show="activeTab === 'browse'" />
+      <BrowseView v-show="activeTab === 'browse'" :active="activeTab === 'browse'" />
       <SettingsView v-show="activeTab === 'settings'" />
     </main>
 
@@ -101,9 +101,9 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 8px 16px;
-  background: color-mix(in srgb, var(--sa-surface) 92%, transparent);
-  backdrop-filter: blur(12px);
+  padding: 10px 16px;
+  background: var(--sa-bar-bg);
+  backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--sa-edge);
 }
 
@@ -115,7 +115,7 @@ onUnmounted(() => {
 }
 
 .brand p {
-  margin: 0;
+  margin: 2px 0 0;
   font-size: 12px;
   color: var(--sa-muted);
 }
@@ -128,20 +128,22 @@ onUnmounted(() => {
 
 .theme-btn {
   height: 32px;
-  padding: 0 14px;
+  padding: 0 12px;
   border: 1px solid var(--sa-edge);
   border-radius: 999px;
   background: transparent;
   color: var(--sa-muted);
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
+  transition: background var(--sa-transition), color var(--sa-transition), border-color var(--sa-transition);
 }
 
 .theme-btn:hover {
   color: var(--sa-ink);
+  background: var(--sa-hover);
 }
 
-.app-nav button {
+.app-nav button:not(.theme-btn) {
   height: 32px;
   padding: 0 14px;
   border: 0;
@@ -149,16 +151,19 @@ onUnmounted(() => {
   background: transparent;
   color: var(--sa-muted);
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background var(--sa-transition), color var(--sa-transition), box-shadow var(--sa-transition);
 }
 
-.app-nav button:hover {
+.app-nav button:not(.theme-btn):hover {
   color: var(--sa-ink);
+  background: var(--sa-hover);
 }
 
-.app-nav button.active {
+.app-nav button:not(.theme-btn).active {
   color: var(--sa-ink);
-  background: var(--sa-field);
+  background: var(--sa-panel);
   box-shadow: inset 0 -2px 0 var(--sa-accent);
 }
 

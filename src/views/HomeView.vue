@@ -1,44 +1,53 @@
 <template>
-  <div class="sa-sheet">
-    <div class="sa-page home-view">
+  <div class="sa-workspace home-workspace">
+    <div class="sa-workspace-main">
+      <div class="sa-page">
       <h2>缓存原创</h2>
       <p class="lede">只收该用户自己发的文字和媒体，转发不收。同一目录会增量更新，并刷新 index.html。已存档的账号到浏览页更新即可。</p>
 
-      <PlatformSelector v-model="platform" />
+      <section class="sa-section">
+        <h3 class="sa-section-title">目标账号</h3>
+        <PlatformSelector v-model="platform" />
 
-      <UserIdInput v-model="user_id" :platform="platform" />
+        <UserIdInput v-model="user_id" :platform="platform" />
 
-      <label class="sa-field">
-        <span>保存目录</span>
-        <div class="sa-row">
-          <input class="sa-input" :value="output_dir" readonly placeholder="选择下载目录" />
-          <button class="sa-btn sa-btn-ghost" type="button" @click="selectOutputDir">选择</button>
+        <CookieInput v-model="cookie" :platform="platform" />
+      </section>
+
+      <section class="sa-section">
+        <h3 class="sa-section-title">保存与范围</h3>
+        <label class="sa-field">
+          <span>保存目录</span>
+          <div class="sa-row">
+            <input class="sa-input" :value="output_dir" readonly placeholder="选择下载目录" />
+            <button class="sa-btn sa-btn-ghost" type="button" @click="selectOutputDir">选择</button>
+          </div>
+        </label>
+
+        <div class="sa-field">
+          <span>日期范围（可选，按发帖日，含首尾）</span>
+          <div class="sa-row">
+            <input
+              class="sa-input"
+              type="date"
+              v-model="startDate"
+              :max="endDate || undefined"
+              aria-label="起始日期"
+            />
+            <span class="date-sep">至</span>
+            <input
+              class="sa-input"
+              type="date"
+              v-model="endDate"
+              :min="startDate || undefined"
+              aria-label="结束日期"
+            />
+          </div>
         </div>
-      </label>
+      </section>
 
-      <CookieInput v-model="cookie" :platform="platform" />
-
-      <div class="sa-field">
-        <span>日期范围（可选，按发帖日，含首尾）</span>
-        <div class="sa-row">
-          <input
-            class="sa-input"
-            type="date"
-            v-model="startDate"
-            :max="endDate || undefined"
-            aria-label="起始日期"
-          />
-          <span class="date-sep">至</span>
-          <input
-            class="sa-input"
-            type="date"
-            v-model="endDate"
-            :min="startDate || undefined"
-            aria-label="结束日期"
-          />
-        </div>
-      </div>
-
+      <section class="sa-section">
+        <h3 class="sa-section-title">高级选项</h3>
       <label v-if="platform === 'weibo'" class="sa-field sa-check">
         <input type="checkbox" v-model="deepBacktrack" />
         <span>深度回溯（忽略「连续已缓存即停」，可从断点继续拉更早内容）</span>
@@ -81,7 +90,10 @@
           <span>同时缓存 Stories（时效内容，平台约 24 小时后可能失效）</span>
         </label>
       </template>
+      </section>
 
+      <section class="sa-section">
+        <h3 class="sa-section-title">执行</h3>
       <div class="sa-row action-row">
         <button
           class="sa-btn sa-btn-primary sa-btn-wide"
@@ -106,9 +118,13 @@
         :posts-count="postsCount"
         :fetch-status="fetchStatus"
       />
-
-      <LogPanel :logs="logs" @clear="clearLogs" />
+      </section>
+      </div>
     </div>
+
+    <aside class="sa-workspace-side">
+      <LogPanel side :logs="logs" @clear="clearLogs" />
+    </aside>
   </div>
 </template>
 
@@ -174,10 +190,15 @@ const cleanupFns: Array<() => void> = []
 const settingsReady = ref(false)
 const toast = useToast()
 
+const MAX_LOG_LINES = 1500
+
 function addLog(msg: string, type: 'info' | 'error' | 'success' = 'info') {
   const now = new Date()
   const time = now.toLocaleTimeString('en-US', { hour12: false })
   logs.value.push({ time, msg, type })
+  if (logs.value.length > MAX_LOG_LINES) {
+    logs.value = logs.value.slice(-MAX_LOG_LINES)
+  }
 }
 
 async function selectOutputDir() {
@@ -438,12 +459,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.home-view {
-  padding-bottom: 32px;
-}
-
 .action-row {
-  margin: 8px 0 16px;
+  margin: 0;
 }
 
 .date-sep {

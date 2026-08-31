@@ -228,6 +228,10 @@ Two semantic palettes exposed as CSS variables (`--sa-*`). Browse can override t
 
 Browse is full-bleed under a thin tab strip. The feed is a 600px column on paper (light) or void (dark). Sticky archive bar is 8px 16px with a 12px blur. Theme toggle lives in the app top bar. Posts pad 12px 16px. Weibo media maxes near 360px with 4px gutters; X media maxes near 510px with 2px gutters and a 16px clip. Avatar is 50px on Weibo/IG posts, 40px on X, 72px on the profile. Empty states are centered, quiet, no illustration.
 
+**Archive overview (Browse hub):** Default Browse right pane before any account is opened. Same 600px column, no avatars or media thumbnails. Header title + muted lede, summary strip on `--sa-field`, clickable user rows with platform pill + name + text-only stats. User mode shows a ghost **返回概览** pill in the sticky bar.
+
+**Chrome polish (v1.1.1):** Cache and Settings use inset `sa-section` panels on `--sa-panel`. Controls share `--sa-hover`, `--sa-transition`, 12px control radius, and accent focus rings. Browse bar uses shared `sa-pill-btn` tokens. Post timeline layout unchanged.
+
 ## Elevation & Depth
 
 Almost flat. Light mode’s only lift is a faint column shadow (`0 1px 3px rgba(0,0,0,0.06)`). Dark mode uses a 1px hairline column edge instead. Everything else is a 1px hairline or a cover block.

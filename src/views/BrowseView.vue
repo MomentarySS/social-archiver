@@ -26,9 +26,16 @@
     <main class="browse-main">
       <header class="browse-bar">
         <div class="bar-left">
-          <label class="user-field">
+          <button
+            v-if="isUserMode"
+            class="sa-pill-btn sa-pill-btn--ghost"
+            type="button"
+            @click="resetToHub"
+          >返回概览</button>
+          <span v-else-if="outputDir" class="hub-label">存档概览</span>
+          <label v-if="isUserMode" class="user-field">
             <span>存档</span>
-            <select v-model="selectedUser" :disabled="!users.length" @change="() => loadPosts()">
+            <select v-model="selectedUser" :disabled="!users.length" @change="onUserSelectChange">
               <option value="" disabled>{{ users.length ? '选择用户' : '还没有存档' }}</option>
               <option v-if="users.length > 1" :value="ALL_USERS_VALUE">全部用户（只读）</option>
               <option v-for="user in users" :key="user.path" :value="user.path">
@@ -36,12 +43,12 @@
               </option>
             </select>
           </label>
-          <button class="ghost-btn" type="button" @click="chooseOutputDir">更换目录</button>
+          <button class="sa-pill-btn sa-pill-btn--ghost" type="button" @click="chooseOutputDir">更换目录</button>
           <button
             v-if="outputDir"
-            class="ghost-btn"
+            class="sa-pill-btn sa-pill-btn--ghost"
             type="button"
-            :disabled="loading || updating"
+            :disabled="loading || updating || statsLoading"
             @click="refreshBrowse"
           >刷新</button>
         </div>
@@ -55,11 +62,11 @@
               aria-label="搜索存档"
               @keydown.enter.prevent="runSearch"
             />
-            <button class="ghost-btn" type="button" :disabled="searching" @click="runSearch">
+            <button class="sa-pill-btn sa-pill-btn--ghost" type="button" :disabled="searching" @click="runSearch">
               {{ searching ? '…' : '搜' }}
             </button>
           </div>
-          <div v-if="outputDir && posts.length" class="date-filter">
+          <div v-if="isUserMode && outputDir && posts.length" class="date-filter">
             <input
               v-model="filterStartDate"
               class="date-input"
@@ -77,13 +84,13 @@
             />
             <button
               v-if="filterStartDate || filterEndDate"
-              class="ghost-btn"
+              class="sa-pill-btn sa-pill-btn--ghost"
               type="button"
               @click="clearDateFilter"
             >清除</button>
           </div>
           <div
-            v-if="posts.length"
+            v-if="isUserMode && posts.length"
             class="view-toggle"
             role="tablist"
             aria-label="浏览视图"
@@ -104,7 +111,7 @@
             >画廊</button>
           </div>
           <div
-            v-if="posts.length"
+            v-if="isUserMode && posts.length"
             class="sort-toggle"
             role="radiogroup"
             aria-label="时间顺序"
@@ -124,10 +131,18 @@
               @click="setSortOrder('oldest')"
             >最早在前</button>
           </div>
-          <span v-if="posts.length" class="post-count">{{ postCountLabel }}</span>
+          <span v-if="isUserMode && posts.length" class="post-count">{{ postCountLabel }}</span>
+          <label
+            v-if="isUserMode && showWeiboUpdateOptions"
+            class="bar-check"
+            title="忽略「连续已缓存即停」，从断点继续拉更早微博"
+          >
+            <input v-model="deepBacktrack" type="checkbox" />
+            <span>深度回溯</span>
+          </label>
           <button
-            v-if="currentUser && !isAllUsersMode"
-            class="primary-btn"
+            v-if="isUserMode && currentUser && !isAllUsersMode"
+            class="sa-pill-btn sa-pill-btn--primary"
             type="button"
             :disabled="updating || exporting"
             @click="updateArchive"
@@ -135,54 +150,48 @@
             {{ updating ? '更新中…' : '更新' }}
           </button>
           <button
-            v-if="updating"
-            class="ghost-btn"
+            v-if="isUserMode && updating"
+            class="sa-pill-btn sa-pill-btn--ghost"
             type="button"
             @click="stopUpdate"
           >停止</button>
-          <button
-            v-if="posts.length && !isAllUsersMode"
-            class="primary-btn"
-            type="button"
-            :disabled="exporting || updating"
-            @click="exportMarkdown"
+          <div
+            v-if="isUserMode && posts.length && !isAllUsersMode"
+            ref="exportMenuRef"
+            class="bar-menu"
           >
-            {{ exporting ? '导出中…' : '导出 Markdown' }}
-          </button>
-          <button
-            v-if="posts.length && !isAllUsersMode"
-            class="ghost-btn"
-            type="button"
-            :disabled="exporting || updating"
-            @click="exportRss"
-          >
-            {{ exporting ? '导出中…' : '导出 RSS' }}
-          </button>
-          <button
-            v-if="posts.length && !isAllUsersMode"
-            class="ghost-btn"
-            type="button"
-            :disabled="exporting || updating"
-            @click="exportJson"
-          >
-            {{ exporting ? '导出中…' : '导出 JSON' }}
-          </button>
-          <button
-            v-if="posts.length && !isAllUsersMode"
-            class="primary-btn"
-            type="button"
-            :disabled="exporting || updating"
-            @click="exportHtml"
-          >
-            {{ exporting ? '导出中…' : '导出离线页' }}
-          </button>
+            <button
+              class="sa-pill-btn sa-pill-btn--ghost"
+              type="button"
+              :disabled="exporting || updating"
+              aria-haspopup="menu"
+              :aria-expanded="exportMenuOpen"
+              @click.stop="exportMenuOpen = !exportMenuOpen"
+            >
+              {{ exporting ? '导出中…' : '导出' }}
+            </button>
+            <div v-if="exportMenuOpen" class="bar-menu-panel" role="menu" @click.stop>
+              <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('markdown')">
+                Markdown
+              </button>
+              <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('rss')">
+                RSS
+              </button>
+              <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('json')">
+                JSON
+              </button>
+              <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('html')">
+                离线 HTML
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
       <div v-if="searchResults.length" class="search-results">
         <div class="search-results-head">
           <span>找到 {{ searchResults.length }} 条</span>
-          <button class="ghost-btn" type="button" @click="clearSearch">清除</button>
+          <button class="sa-pill-btn sa-pill-btn--ghost" type="button" @click="clearSearch">清除</button>
         </div>
         <button
           v-for="hit in searchResults"
@@ -198,8 +207,17 @@
 
       <div v-if="!outputDir" class="empty-state">
         <p>还没有打开存档目录</p>
-        <button class="primary-btn" type="button" @click="chooseOutputDir">选择下载目录</button>
+        <button class="sa-pill-btn sa-pill-btn--primary" type="button" @click="chooseOutputDir">选择下载目录</button>
       </div>
+
+      <BrowseHub
+        v-else-if="isHubMode"
+        :users="users"
+        :stats="archiveStats"
+        :loading="statsLoading"
+        :all-users-value="ALL_USERS_VALUE"
+        @enter-user="enterUser"
+      />
 
       <div v-else-if="loading" class="feed">
         <div class="profile-card skeleton-profile"></div>
@@ -208,7 +226,6 @@
 
       <div v-else class="feed">
         <section v-if="isAllUsersMode" class="profile-card profile-card-all">
-          <div class="cover"></div>
           <div class="profile-main">
             <div class="profile-text">
               <h2>全部用户</h2>
@@ -217,7 +234,6 @@
           </div>
         </section>
         <section v-else-if="currentUser" class="profile-card">
-          <div class="cover"></div>
           <div class="profile-main">
             <div class="profile-avatar">
               <img v-if="headerAvatar" :src="headerAvatar" alt="" />
@@ -260,6 +276,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import BrowseHub from '../components/BrowseHub.vue'
 import LazyPost from '../components/LazyPost.vue'
 import MediaGallery from '../components/MediaGallery.vue'
 import UserManager from '../components/UserManager.vue'
@@ -278,7 +295,11 @@ import {
   saveUserCookie,
 } from '../utils/session.js'
 import { useToast } from '../composables/useToast'
-import type { BatchEvent, Post, SearchHit, UserEntry, UserScheduleMode, UserStats } from '../electron-api.d.ts'
+import type { ArchiveStats, BatchEvent, Post, SearchHit, UserEntry, UserScheduleMode, UserStats } from '../electron-api.d.ts'
+
+const props = defineProps<{
+  active?: boolean
+}>()
 
 const ALL_USERS_VALUE = '__all__'
 
@@ -287,6 +308,10 @@ const users = ref<UserEntry[]>([])
 const selectedUser = ref('')
 const posts = ref<Post[]>([])
 const loading = ref(false)
+const statsLoading = ref(false)
+const browseMode = ref<'hub' | 'user'>('hub')
+const archiveStats = ref<ArchiveStats | null>(null)
+const skipNextHubReset = ref(false)
 const exporting = ref(false)
 const updating = ref(false)
 const headerAvatar = ref('')
@@ -310,12 +335,21 @@ const pendingHash = ref('')
 const filterStartDate = ref('')
 const filterEndDate = ref('')
 const activeHighlightQuery = ref('')
+const exportMenuOpen = ref(false)
+const exportMenuRef = ref<HTMLElement | null>(null)
+const deepBacktrack = ref(false)
 
 // userList = users with lastUpdate populated from _profile.json
 const userList = ref<UserEntry[]>([])
 
 const currentUser = computed(() => users.value.find(u => u.path === selectedUser.value) || null)
+const isHubMode = computed(() => browseMode.value === 'hub')
+const isUserMode = computed(() => browseMode.value === 'user')
 const isAllUsersMode = computed(() => selectedUser.value === ALL_USERS_VALUE)
+const showWeiboUpdateOptions = computed(() => {
+  if (isAllUsersMode.value || !currentUser.value) return false
+  return normalizePlatform(currentUser.value.platform, 'weibo') === 'weibo'
+})
 const filteredPosts = computed(() => filterPostsByDate(
   posts.value,
   filterStartDate.value,
@@ -335,12 +369,45 @@ function setSortOrder(order: 'newest' | 'oldest') {
   sortOrder.value = order
 }
 
+watch(selectedUser, () => {
+  deepBacktrack.value = false
+})
+
+watch(userStats, (stats) => {
+  if (!showWeiboUpdateOptions.value) return
+  const status = stats?.fetchStatus || ''
+  if (status === 'partial' || status === 'page_limit') {
+    deepBacktrack.value = true
+  }
+})
+
+function closeExportMenu() {
+  exportMenuOpen.value = false
+}
+
+function onDocumentClick(event: MouseEvent) {
+  if (!exportMenuOpen.value) return
+  const root = exportMenuRef.value
+  if (root && !root.contains(event.target as Node)) {
+    closeExportMenu()
+  }
+}
+
+async function runExport(kind: 'markdown' | 'rss' | 'json' | 'html') {
+  closeExportMenu()
+  if (kind === 'markdown') await exportMarkdown()
+  else if (kind === 'rss') await exportRss()
+  else if (kind === 'json') await exportJson()
+  else await exportHtml()
+}
+
 const currentPlatform = computed(() => detectPostPlatform(posts.value[0], currentUser.value))
 
 const platformLabel = computed(() => PLATFORM_LABELS[currentPlatform.value as Platform] || '存档')
 
 watch(selectedUser, () => {
   activeHighlightQuery.value = ''
+  closeExportMenu()
 })
 
 watch(currentUser, async (user) => {
@@ -452,6 +519,7 @@ function clearSearch() {
 
 async function openSearchHit(hit: SearchHit) {
   activeHighlightQuery.value = searchQuery.value.trim()
+  browseMode.value = 'user'
   selectedUser.value = hit.userDir
   await loadPosts()
   const anchor = `post-${hit.postId}`
@@ -463,6 +531,7 @@ async function openSearchHit(hit: SearchHit) {
 async function openPostFromNav(detail: OpenPostDetail) {
   if (!detail?.userDir || !detail.postId) return
   activeHighlightQuery.value = detail.highlightQuery || ''
+  browseMode.value = 'user'
   selectedUser.value = detail.userDir
   await loadPosts()
   const anchor = `post-${detail.postId}`
@@ -471,15 +540,62 @@ async function openPostFromNav(detail: OpenPostDetail) {
 }
 
 function onOpenPostEvent(event: Event) {
+  skipNextHubReset.value = true
   const detail = (event as CustomEvent<OpenPostDetail>).detail
   if (detail) void openPostFromNav(detail)
 }
+
+function resetToHub() {
+  browseMode.value = 'hub'
+  selectedUser.value = ''
+  posts.value = []
+  loading.value = false
+  activeHighlightQuery.value = ''
+  closeExportMenu()
+  window.location.hash = ''
+}
+
+async function enterUser(path: string) {
+  if (!path) return
+  browseMode.value = 'user'
+  selectedUser.value = path
+  await loadPosts()
+}
+
+function onUserSelectChange() {
+  if (!selectedUser.value) return
+  browseMode.value = 'user'
+  void loadPosts()
+}
+
+async function loadArchiveStats() {
+  archiveStats.value = null
+  if (!outputDir.value || !window.electronAPI) return
+  statsLoading.value = true
+  try {
+    archiveStats.value = await window.electronAPI.getArchiveStats(outputDir.value)
+  } catch (e) { /* ignore */ }
+  finally {
+    statsLoading.value = false
+  }
+}
+
+watch(() => props.active, (isActive, wasActive) => {
+  if (isActive && wasActive === false) {
+    if (skipNextHubReset.value) {
+      skipNextHubReset.value = false
+      return
+    }
+    resetToHub()
+  }
+})
 
 onMounted(async () => {
   setupUpdateListeners()
   setupBatchListeners()
   window.addEventListener('hashchange', scrollToPostFromHash)
   window.addEventListener(OPEN_POST_EVENT, onOpenPostEvent as EventListener)
+  window.addEventListener('click', onDocumentClick)
   try {
     if (window.electronAPI) {
       updating.value = await window.electronAPI.isDownloading()
@@ -496,6 +612,7 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('hashchange', scrollToPostFromHash)
   window.removeEventListener(OPEN_POST_EVENT, onOpenPostEvent as EventListener)
+  window.removeEventListener('click', onDocumentClick)
   cleanupFns.forEach((fn) => fn())
 })
 
@@ -520,15 +637,13 @@ async function scanUsers() {
   users.value = []
   selectedUser.value = ''
   posts.value = []
+  browseMode.value = 'hub'
   try {
     if (window.electronAPI) {
       const raw = await window.electronAPI.scanArchives(outputDir.value)
       users.value = raw
       userList.value = raw
-      if (users.value.length) {
-        selectedUser.value = users.value[0].path
-        await loadPosts()
-      }
+      await loadArchiveStats()
     }
   } catch (e) {
     toast.error('扫描失败')
@@ -569,7 +684,16 @@ async function loadPosts(opts?: { silent?: boolean }) {
 async function refreshBrowse() {
   if (!outputDir.value) return
   try {
-    await refreshCurrentArchive(selectedUser.value, { silent: true })
+    if (isUserMode.value && selectedUser.value) {
+      await refreshCurrentArchive(selectedUser.value, { silent: true })
+    } else {
+      const raw = await window.electronAPI?.scanArchives(outputDir.value)
+      if (raw) {
+        users.value = raw
+        userList.value = raw
+      }
+      await loadArchiveStats()
+    }
     toast.success('已刷新')
   } catch (e) {
     toast.error('刷新失败')
@@ -587,7 +711,10 @@ async function ensureCookie(platform: string, userId: string) {
   const settings = await window.electronAPI!.getSettings()
   let cookie = cookieForUser(settings, platform, userId)
     || cookieForPlatform(settings, platform)
-  if (hasUsableCookie(platform, cookie)) return cookie
+  if (hasUsableCookie(platform, cookie) && window.electronAPI) {
+    const check = await window.electronAPI.checkCookie({ platform, cookie })
+    if (check.valid) return cookie
+  }
   toast.info(
     platform === 'twitter' ? '需要登录 X，打开登录窗'
       : platform === 'instagram' ? '需要登录 Instagram，打开登录窗'
@@ -598,8 +725,12 @@ async function ensureCookie(platform: string, userId: string) {
     toast.error(res.error || '登录失败。也可到缓存页或设置页粘贴 Cookie。')
     return ''
   }
+  const check = await window.electronAPI!.checkCookie({ platform, cookie: res.cookie })
+  if (!check.valid) {
+    toast.error(check.message || '微博 Cookie 仍未处于登录状态，请完成登录后再关闭窗口')
+    return ''
+  }
   await saveUserCookie(platform, userId, res.cookie)
-  await savePlatformCookie(platform, res.cookie)
   return res.cookie
 }
 
@@ -650,7 +781,14 @@ async function startUserDownload(
 async function updateArchive() {
   const user = currentUser.value
   if (!user) return
-  await startUserDownload(user)
+  await startUserDownload(user, weiboDownloadOptions(user))
+}
+
+function weiboDownloadOptions(user?: UserEntry) {
+  const platform = normalizePlatform(user?.platform ?? currentUser.value?.platform, 'weibo')
+  if (platform !== 'weibo') return {}
+  const forCurrent = !user || user.path === selectedUser.value
+  return { deepBacktrack: forCurrent ? deepBacktrack.value : false }
 }
 
 async function stopUpdate() {
@@ -681,12 +819,11 @@ function setupUpdateListeners() {
 
 // ─── Batch handlers (called from UserManager) ───────────────────
 async function handleSelectUser(path: string) {
-  selectedUser.value = path
-  await loadPosts()
+  await enterUser(path)
 }
 
 async function handleUpdateUser(user: UserEntry) {
-  await startUserDownload(user)
+  await startUserDownload(user, weiboDownloadOptions(user))
 }
 
 async function handleDeleteUser(user: UserEntry) {
@@ -797,6 +934,7 @@ async function handleAddUser(data: {
   )
   if (existing) {
     toast.info('该用户已存在，开始更新…')
+    browseMode.value = 'user'
     selectedUser.value = existing.path
     await loadPosts()
     await startUserDownload(existing, {
@@ -903,10 +1041,13 @@ async function refreshCurrentArchive(userDir?: string, opts?: { silent?: boolean
     const raw = await api.scanArchives(outputDir.value)
     users.value = raw
     userList.value = raw
-    if (keep && users.value.some((u) => u.path === keep)) {
+    if (browseMode.value === 'user' && keep && users.value.some((u) => u.path === keep)) {
       selectedUser.value = keep
+      await loadPosts({ silent: opts?.silent })
     }
-    await loadPosts({ silent: opts?.silent })
+    if (browseMode.value === 'hub') {
+      await loadArchiveStats()
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -1014,10 +1155,14 @@ async function exportHtml() {
   width: 320px;
   flex-shrink: 0;
   border-right: 1px solid var(--sa-edge);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: calc(100vh - 58px);
   max-height: calc(100vh - 58px);
   position: sticky;
   top: 58px;
+  background: var(--sa-bg);
 }
 
 .browse-main {
@@ -1065,12 +1210,25 @@ async function exportHtml() {
   border: 1px solid var(--sa-edge);
   background: transparent;
   color: var(--sa-muted);
+  transition: background var(--sa-transition), border-color var(--sa-transition), color var(--sa-transition);
+}
+
+.sort-toggle button:hover:not(.active) {
+  background: var(--sa-hover);
+  color: var(--sa-ink);
 }
 
 .sort-toggle button.active {
   background: var(--sa-accent);
   border-color: var(--sa-accent);
   color: #fff;
+}
+
+.hub-label {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--sa-ink);
 }
 
 .user-field {
@@ -1083,44 +1241,81 @@ async function exportHtml() {
 .user-field select {
   min-width: 180px;
   height: 32px;
-  border-radius: 999px;
+  border-radius: var(--sa-radius-control);
   padding: 0 12px;
   font: inherit;
   border: 1px solid var(--sa-edge);
   background: var(--sa-field);
   color: var(--sa-ink);
+  transition: border-color var(--sa-transition), box-shadow var(--sa-transition);
 }
 
-.ghost-btn,
-.primary-btn {
-  height: 32px;
-  border-radius: 999px;
-  padding: 0 14px;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.ghost-btn {
-  background: transparent;
-  border: 1px solid var(--sa-edge);
-  color: var(--sa-ink);
-}
-
-.primary-btn {
-  border: 0;
-  color: #fff;
-  background: var(--sa-accent);
-}
-
-.primary-btn:disabled {
-  opacity: 0.6;
-  cursor: wait;
+.user-field select:focus {
+  border-color: var(--sa-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sa-accent) 18%, transparent);
+  outline: none;
 }
 
 .post-count {
   font-size: 13px;
   color: var(--sa-muted);
+}
+
+.bar-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--sa-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.bar-check input {
+  margin: 0;
+}
+
+.bar-menu {
+  position: relative;
+}
+
+.bar-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 148px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--sa-edge);
+  background: var(--sa-surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bar-menu-panel button {
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--sa-ink);
+  cursor: pointer;
+}
+
+.bar-menu-panel button:hover:not(:disabled) {
+  background: var(--sa-field);
+}
+
+.bar-menu-panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .view-toggle {
@@ -1138,6 +1333,12 @@ async function exportHtml() {
   font: inherit;
   font-size: 13px;
   cursor: pointer;
+  transition: background var(--sa-transition), border-color var(--sa-transition), color var(--sa-transition);
+}
+
+.view-toggle button:hover:not(.active) {
+  background: var(--sa-hover);
+  color: var(--sa-ink);
 }
 
 .view-toggle button.active {
@@ -1168,13 +1369,20 @@ async function exportHtml() {
 .date-input {
   width: 118px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--sa-radius-control);
   border: 1px solid var(--sa-edge);
   background: var(--sa-field);
   color: var(--sa-ink);
   padding: 0 8px;
   font: inherit;
   font-size: 12px;
+  transition: border-color var(--sa-transition), box-shadow var(--sa-transition);
+}
+
+.date-input:focus {
+  border-color: var(--sa-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sa-accent) 18%, transparent);
+  outline: none;
 }
 
 .date-sep {
@@ -1192,13 +1400,20 @@ async function exportHtml() {
 .search-input {
   width: 140px;
   height: 32px;
-  border-radius: 999px;
+  border-radius: var(--sa-radius-control);
   border: 1px solid var(--sa-edge);
   background: var(--sa-field);
   color: var(--sa-ink);
   padding: 0 12px;
   font: inherit;
   font-size: 13px;
+  transition: border-color var(--sa-transition), box-shadow var(--sa-transition);
+}
+
+.search-input:focus {
+  border-color: var(--sa-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sa-accent) 18%, transparent);
+  outline: none;
 }
 
 .search-results {
@@ -1248,7 +1463,6 @@ async function exportHtml() {
 .feed {
   max-width: 600px;
   margin: 0 auto;
-  min-height: 70vh;
   background: var(--sa-surface);
   box-shadow: var(--sa-feed-shadow);
   border-inline: var(--sa-feed-border);
@@ -1256,25 +1470,20 @@ async function exportHtml() {
 
 .profile-card {
   position: relative;
-}
-
-.cover {
-  height: 120px;
-  background: var(--sa-cover);
+  border-bottom: 1px solid var(--sa-hairline);
 }
 
 .profile-main {
   display: flex;
   gap: 12px;
-  padding: 0 16px 16px;
-  align-items: flex-end;
+  padding: 16px 16px 14px;
+  align-items: center;
 }
 
 .profile-avatar {
-  width: 72px;
-  height: 72px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  margin-top: -28px;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -1284,7 +1493,6 @@ async function exportHtml() {
   flex-shrink: 0;
   background: var(--sa-avatar);
   color: #fff;
-  border: 3px solid var(--sa-surface);
 }
 
 .profile-avatar img {
@@ -1294,7 +1502,7 @@ async function exportHtml() {
 }
 
 .profile-text {
-  padding-bottom: 4px;
+  min-width: 0;
 }
 
 .profile-text h2 {
@@ -1321,7 +1529,7 @@ async function exportHtml() {
 }
 
 .skeleton-profile {
-  height: 180px;
+  height: 88px;
 }
 
 .skeleton-post {
@@ -1332,15 +1540,15 @@ async function exportHtml() {
 
 .empty-state {
   text-align: center;
-  padding: 80px 20px;
+  padding: 48px 20px;
 }
 
 .empty-state p {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   color: var(--sa-muted);
 }
 
 .empty-state.inner {
-  padding: 48px 20px;
+  padding: 28px 20px 36px;
 }
 </style>

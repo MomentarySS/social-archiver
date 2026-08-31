@@ -180,11 +180,12 @@ function archivePageHtml({ userName, handle, platform, body, count, theme }) {
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--ink); }
   .page { max-width: 600px; margin: 0 auto; background: var(--surface); min-height: 100vh; box-shadow: var(--page-shadow); border-inline: var(--page-border); }
-  .cover { height: 120px; background: var(--cover); }
-  .profile { padding: 0 16px 16px; }
+  .profile { padding: 16px 16px 14px; border-bottom: 1px solid var(--hairline); }
   .band { height: 8px; background: var(--bg); }
-  .avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--avatar); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; margin-top: -28px; border: 3px solid var(--surface); }
-  h1 { font-size: 20px; font-weight: 800; margin-top: 10px; letter-spacing: -0.02em; }
+  .avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--avatar); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; }
+  .profile-head { display: flex; gap: 12px; align-items: center; }
+  .profile-copy { min-width: 0; }
+  h1 { font-size: 20px; font-weight: 800; margin: 0; letter-spacing: -0.02em; }
   .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
   .handle { color: var(--muted); font-weight: 400; }
   .post { padding: 12px 16px; border-bottom: 1px solid var(--hairline); }
@@ -213,11 +214,14 @@ function archivePageHtml({ userName, handle, platform, body, count, theme }) {
 </head>
 <body>
 <div class="page">
-  <div class="cover"></div>
   <div class="profile">
-    <div class="avatar">${escapeHtml(userName.slice(0, 1))}</div>
-    <h1>${escapeHtml(userName)}</h1>
-    <div class="sub">${subtitle}</div>
+    <div class="profile-head">
+      <div class="avatar">${escapeHtml(userName.slice(0, 1))}</div>
+      <div class="profile-copy">
+        <h1>${escapeHtml(userName)}</h1>
+        <div class="sub">${subtitle}</div>
+      </div>
+    </div>
     ${toolbarHtml()}
   </div>
   <div class="band"></div>

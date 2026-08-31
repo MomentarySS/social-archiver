@@ -66,6 +66,7 @@ const groups = computed(() => {
 <style scoped>
 .media-gallery {
   padding: 0 16px 24px;
+  container-type: inline-size;
 }
 
 .gallery-group + .gallery-group {
@@ -83,6 +84,12 @@ const groups = computed(() => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
+}
+
+@container (max-width: 420px) {
+  .gallery-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .gallery-cell {

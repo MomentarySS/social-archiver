@@ -69,6 +69,7 @@ export interface Settings {
   output_dir?: string
   concurrent?: number
   naming_template?: string
+  proxy_url?: string
   last_platform?: string
   cookies?: Record<string, string> & {
     per_user?: Record<string, string>
@@ -156,7 +157,7 @@ export interface UserEntry {
 
 // Discriminated union for the download:event IPC channel
 export type ProgressEvent = { type: 'progress'; file: string; percent: number; current: number; total: number }
-export type DoneResult    = { type: 'done';    count: number; skipped: number; posts: number; fetch_status?: string; output_dir?: string; userDir?: string }
+export type DoneResult    = { type: 'done';    count: number; skipped: number; posts: number; fetch_status?: string; output_dir?: string; userDir?: string; cookie?: string }
 export type ErrorResult   = { type: 'error';  msg: string }
 export type StatusEvent   = { type: 'status'; msg: string }
 export type DownloadEvent = ProgressEvent | DoneResult | ErrorResult | StatusEvent
@@ -284,6 +285,7 @@ export interface UserStats {
   earliestDate: string
   latestDate: string
   lastUpdate: string
+  fetchStatus?: string
 }
 
 export interface ArchiveStats {
