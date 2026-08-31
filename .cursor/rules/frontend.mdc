@@ -1,0 +1,16 @@
+---
+description: Electron 壳与 Vue 前端
+globs: src/**,electron-main.js,preload.js
+alwaysApply: false
+---
+
+# 前端（Electron + Vue）
+
+- 三页：缓存 / 浏览 / 设置；`Ctrl+1/2/3` 仅在窗口聚焦时切换 Tab
+- 阅读主题：统一浅色/深色（默认浅色），偏好键 `sa-browse-theme`；勿恢复三平台橙/蓝配色
+- 帖子布局按平台区分；改视觉遵循 `DESIGN.md`
+- 本地媒体：`social-archiver://` 协议，路径限制在存档根；图片 URL 在渲染进程拼接，避免每张图 IPC
+- Cookie：经临时 `--cookie-file` 传给后端，不出现在进程命令行
+- `settings.json` 主进程合并写入，避免 Cookie 键并发覆盖
+- 打包须保留整个 `win-unpacked`（含 `resources/backend/backend.exe`），不能只拷 exe
+- 测试：相关逻辑补 `src/**/*.test.ts`；改 constants / session / archiveHtml 时跑 vitest
