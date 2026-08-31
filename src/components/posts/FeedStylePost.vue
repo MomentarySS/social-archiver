@@ -6,7 +6,6 @@ import './postCard.css'
 
 const props = defineProps<{
   post: Post
-  platform: 'weibo' | 'instagram'
   highlightQuery?: string
 }>()
 
@@ -18,11 +17,6 @@ const {
   isQuote,
   quotedFrom,
   isPinned,
-  isCarousel,
-  carouselCount,
-  isStory,
-  isReel,
-  handle,
   weiboTime,
   weiboText,
   expandedIndex,
@@ -58,7 +52,7 @@ const {
 </script>
 
 <template>
-  <article :id="postDomId" :class="platform === 'instagram' ? 'ig-post' : 'wb-post'">
+  <article :id="postDomId" class="wb-post">
     <button class="wb-avatar" type="button" tabindex="-1">
       <img v-if="avatarUrl" :src="avatarUrl" alt="" />
       <span v-else>{{ initial }}</span>
@@ -66,16 +60,9 @@ const {
     <div class="wb-body">
       <div class="wb-name-row">
         <span class="wb-name">{{ displayName }}</span>
-        <span v-if="post.verified && platform === 'weibo'" class="wb-vip" title="微博认证">V</span>
+        <span v-if="post.verified" class="wb-vip" title="微博认证">V</span>
         <span v-if="isQuote" class="sa-quote-badge">引用自 @{{ quotedFrom }}</span>
         <span v-if="isPinned" class="sa-pinned-badge">置顶</span>
-        <span v-if="isCarousel" class="ig-carousel-badge">轮播 {{ carouselCount }}</span>
-        <span v-if="isStory" class="ig-story-badge">Story</span>
-        <span v-if="isReel" class="ig-reel-badge">Reel</span>
-        <template v-if="platform === 'instagram'">
-          <span class="ig-handle">@{{ handle }}</span>
-          <span class="ig-time">{{ weiboTime }}</span>
-        </template>
       </div>
       <div v-if="post.text" class="wb-text" v-html="weiboText"></div>
       <div v-if="expandedIndex !== null && mediaItems[expandedIndex]" class="wb-expand">
@@ -168,20 +155,12 @@ const {
           </template>
         </div>
       </div>
-      <div v-if="platform !== 'instagram'" class="wb-meta">
+      <div class="wb-meta">
         <span>{{ weiboTime }}</span>
         <span v-if="post.source">来自 {{ post.source }}</span>
         <a
           v-if="post.url"
           class="wb-open"
-          :href="post.url"
-          @click.prevent="openLink(post.url)"
-        >查看原文</a>
-      </div>
-      <div v-else class="ig-meta">
-        <a
-          v-if="post.url"
-          class="ig-open"
           :href="post.url"
           @click.prevent="openLink(post.url)"
         >查看原文</a>

@@ -63,6 +63,31 @@ describe('buildArchiveHtml', () => {
     expect(html).not.toContain('来自')
   })
 
+  it('renders instagram carousel slides as media cells', () => {
+    const html = buildArchiveHtml({
+      posts: [{
+        id: '1',
+        platform: 'instagram',
+        user_name: 'Ada',
+        screen_name: 'ada',
+        pics: [
+          { date_folder: '2024-01-01', filename: 'a.jpg' },
+          { date_folder: '2024-01-01', filename: 'b.jpg' },
+        ],
+      }],
+      userName: 'Ada',
+      handle: 'ada',
+      platform: 'instagram',
+      theme: 'light',
+    })
+    expect(html).toContain('class="ig-slide"')
+    expect(html).toContain('2024-01-01/a.jpg')
+    expect(html).toContain('2024-01-01/b.jpg')
+    expect(html).not.toContain('[object Object]')
+    expect(html).toContain('ig-nav-prev')
+    expect(html).toContain('ig-dot')
+  })
+
   it('embeds dark theme when requested', () => {
     const html = buildArchiveHtml({
       posts: [{ id: '1', platform: 'weibo', text: 'hi' }],

@@ -53,6 +53,8 @@ export interface ElectronAPI {
   rebuildSearchIndex: (outputDir: string) => Promise<{ success: boolean; count?: number; error?: string }>
   verifyArchives: (params: { outputDir: string; platform?: string; userId?: string }) => Promise<VerifyResult>
   checkCookie: (params: { platform: string; cookie: string }) => Promise<CookieCheckResult>
+  importBrowserCookies: (params?: { browser?: string; platform?: string }) => Promise<ImportBrowserCookiesResult>
+  refreshInstagramSession: (params?: { userId?: string }) => Promise<RefreshInstagramSessionResult>
   getPortableInfo: () => Promise<PortableInfo>
   getUserStats: (userDir: string) => Promise<UserStats | null>
   getArchiveStats: (outputDir: string) => Promise<ArchiveStats>
@@ -186,8 +188,8 @@ export interface UserEntry {
 // Discriminated union for the download:event IPC channel
 export type ProgressEvent = { type: 'progress'; file: string; percent: number; current: number; total: number }
 export type DoneResult    = { type: 'done';    count: number; skipped: number; posts: number; fetch_status?: string; output_dir?: string; userDir?: string; cookie?: string }
-export type ErrorResult   = { type: 'error';  msg: string }
-export type StatusEvent   = { type: 'status'; msg: string }
+export type ErrorResult   = { type: 'error';  msg: string; cookie?: string }
+export type StatusEvent   = { type: 'status'; msg: string; cookie?: string }
 export type DownloadEvent = ProgressEvent | DoneResult | ErrorResult | StatusEvent
 
 export interface LogEvent {
@@ -300,6 +302,26 @@ export interface VerifyResult {
 export interface CookieCheckResult {
   valid: boolean
   message: string
+}
+
+export interface BrowserCookieImportItem {
+  platform: string
+  cookie: string
+  valid: boolean
+  message: string
+}
+
+export interface ImportBrowserCookiesResult {
+  success: boolean
+  error?: string
+  browser?: string
+  imports?: BrowserCookieImportItem[]
+}
+
+export interface RefreshInstagramSessionResult {
+  refreshed: boolean
+  cookie?: string
+  message?: string
 }
 
 export interface PortableInfo {

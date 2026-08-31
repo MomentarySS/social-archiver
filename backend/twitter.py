@@ -18,6 +18,8 @@ from backend.gallery_dl_runner import (
     MEDIA_EXTS,
     GalleryDlStats,
     apply_date_range,
+    apply_gallery_dl_downloader_antirate,
+    apply_twitter_extractor_antirate,
     build_gallery_dl_config,
     date_range_status,
     ensure_gallery_dl,
@@ -31,6 +33,8 @@ from backend.metadata import existing_avatar, save_post_metadata, save_profile
 
 BOOKMARK_SUFFIX = "--bookmarks"
 LIKE_SUFFIX = "--likes"
+SESSION_COOKIE_NAME = ".session-cookies.txt"
+COOKIE_HEADER_KEYS = ("auth_token", "ct0", "kdt", "twid", "auth_multi")
 
 
 def _split_twitter_user_id(user_id: str):
@@ -132,11 +136,12 @@ def download_twitter_media(
         "replies": bool(include_replies),
         "text-tweets": True,
         "pinned": True,
-        "sleep-request": "1.0-2.0",
         "image-filter": "extension != 'm3u8'",
         "archive": os.path.join(user_dir, ".download-archive.sqlite"),
     }
+    apply_twitter_extractor_antirate(twitter_cfg)
     browser_flag = None
+    cookie_file = None
     if parsed["mode"] == "browser":
         browser_flag = parsed["browser"]
         yield {
@@ -147,18 +152,25 @@ def download_twitter_media(
             ),
         }
     else:
-        cookie_file = os.path.join(user_dir, ".twitter-cookies.txt")
-        _write_netscape_cookies(cookie_file, parsed["cookies"])
+        cookie_file, reused = _prepare_twitter_cookie_file(
+            output_dir, user_dir, parsed["cookies"]
+        )
         twitter_cfg["cookies"] = cookie_file
-        names = ", ".join(parsed["cookies"].keys())
+        loaded = _read_netscape_cookies(cookie_file) or parsed["cookies"]
+        names = ", ".join(key for key in COOKIE_HEADER_KEYS if key in loaded)
+        if reused:
+            yield {
+                "type": "status",
+                "msg": "沿用上次缓存刷新后的 X Cookie（ct0 可能已更新），避免换账号后仍用旧登录态。",
+            }
         yield {"type": "status", "msg": f"已加载推特 Cookie：{names}"}
-        if "auth_token" not in parsed["cookies"]:
+        if "auth_token" not in loaded:
             yield {
                 "type": "error",
                 "msg": "Cookie 里没有 auth_token。请从 x.com（不是 twitter.com 旧站）复制登录后的 Cookie。",
             }
             return
-        if "ct0" not in parsed["cookies"]:
+        if "ct0" not in loaded:
             yield {"type": "status", "msg": "未发现 ct0，若失败请把完整 Cookie 一并粘贴。"}
     if start_date or end_date:
         swapped = apply_date_range(twitter_cfg, start_date, end_date)
@@ -174,6 +186,7 @@ def download_twitter_media(
         }
     ]
     config = build_gallery_dl_config(output_dir, "twitter", twitter_cfg, concurrent, postprocessors)
+    apply_gallery_dl_downloader_antirate(config, concurrent)
     config_path = write_gallery_dl_config(config)
 
     if archive_mode == "bookmarks":
@@ -211,13 +224,18 @@ def download_twitter_media(
             cmd,
             stats,
             _map_gallery_dl_error,
-            f"gallery-dl 失败（退出码未知）。推特需要有效的 auth_token Cookie。",
+            "请重新登录 X，或确认 auth_token / ct0 仍然有效。",
         )
     except Exception as e:
         yield {"type": "error", "msg": str(e)}
         return
     finally:
         remove_gallery_dl_config(config_path)
+
+    yield from _yield_refreshed_twitter_cookie(
+        cookie_file if parsed["mode"] == "values" else None,
+        user_dir,
+    )
 
     if stats.fatal_msg:
         return
@@ -309,13 +327,17 @@ def download_twitter_media(
             end_date=end_date,
         )
 
-    yield {
+    done_event = {
         "type": "done",
         "count": stats.total,
         "skipped": stats.skipped,
         "posts": written,
         "output_dir": os.path.join(output_dir, "twitter", storage_user_id),
     }
+    header = _cookie_header_from_file(cookie_file)
+    if header:
+        done_event["cookie"] = header
+    yield done_event
 
 
 def _fetch_twitter_avatar(
@@ -430,13 +452,15 @@ def _download_twitter_supplementary(
         "replies": False,
         "text-tweets": True,
         "pinned": False,
-        "sleep-request": "1.0-2.0",
         "image-filter": "extension != 'm3u8'",
         "archive": os.path.join(user_dir, ".download-archive.sqlite"),
     }
+    apply_twitter_extractor_antirate(twitter_cfg)
+    cookie_file = None
     if parsed["mode"] == "values":
-        cookie_file = os.path.join(user_dir, ".twitter-cookies.txt")
-        _write_netscape_cookies(cookie_file, parsed["cookies"])
+        cookie_file, _reused = _prepare_twitter_cookie_file(
+            output_dir, user_dir, parsed["cookies"]
+        )
         twitter_cfg["cookies"] = cookie_file
     if start_date or end_date:
         swapped = apply_date_range(twitter_cfg, start_date, end_date)
@@ -451,6 +475,7 @@ def _download_twitter_supplementary(
         }
     ]
     config = build_gallery_dl_config(output_dir, "twitter", twitter_cfg, concurrent, postprocessors)
+    apply_gallery_dl_downloader_antirate(config, concurrent)
     config_path = write_gallery_dl_config(config)
     cmd = gallery_dl_cmd("-c", config_path)
     if browser_flag:
@@ -463,13 +488,14 @@ def _download_twitter_supplementary(
             cmd,
             stats,
             _map_gallery_dl_error,
-            f"gallery-dl 失败（退出码未知）。X {label} 需要有效的 auth_token Cookie。",
+            f"X {label} 缓存失败。请重新登录 X，或确认 auth_token / ct0 仍然有效。",
         )
     except Exception as e:
         yield {"type": "error", "msg": str(e)}
         return
     finally:
         remove_gallery_dl_config(config_path)
+    yield from _yield_refreshed_twitter_cookie(cookie_file, user_dir)
     if stats.fatal_msg:
         return
     written = _normalize_twitter_archive(
@@ -536,9 +562,102 @@ def _write_netscape_cookies(path: str, cookies: Dict[str, str]) -> None:
     lines = ["# Netscape HTTP Cookie File", "# generated by social-archiver"]
     for domain in (".x.com", ".twitter.com"):
         for name, value in cookies.items():
+            if not name or value is None or value == "":
+                continue
             lines.append(f"{domain}\tTRUE\t/\tTRUE\t2147483647\t{name}\t{value}")
     with open(path, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines) + "\n")
+
+
+def _twitter_session_cookie_path(output_dir: str) -> str:
+    return os.path.join(output_dir, "twitter", SESSION_COOKIE_NAME)
+
+
+def _read_netscape_cookies(path: Optional[str]) -> Dict[str, str]:
+    if not path or not os.path.isfile(path):
+        return {}
+    result: Dict[str, str] = {}
+    x_com: Dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return {}
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("#HttpOnly_"):
+            line = line[len("#HttpOnly_"):]
+        elif not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 7:
+            continue
+        domain, name, value = parts[0], parts[-2], parts[-1]
+        if not name or not value:
+            continue
+        if domain.endswith("x.com"):
+            x_com[name] = value
+        else:
+            result.setdefault(name, value)
+    result.update(x_com)
+    return result
+
+
+def _cookie_header_from_map(cookies: Dict[str, str]) -> str:
+    parts: List[str] = []
+    seen = set()
+    for key in COOKIE_HEADER_KEYS:
+        value = cookies.get(key)
+        if value:
+            parts.append(f"{key}={value}")
+            seen.add(key)
+    return "; ".join(parts)
+
+
+def _cookie_header_from_file(path: Optional[str]) -> str:
+    return _cookie_header_from_map(_read_netscape_cookies(path))
+
+
+def _prepare_twitter_cookie_file(
+    output_dir: str,
+    user_dir: str,
+    parsed_cookies: Dict[str, str],
+):
+    session_path = _twitter_session_cookie_path(output_dir)
+    os.makedirs(os.path.dirname(session_path), exist_ok=True)
+    existing = _read_netscape_cookies(session_path)
+    reuse = bool(
+        existing.get("auth_token")
+        and existing.get("auth_token") == parsed_cookies.get("auth_token")
+        and existing.get("ct0")
+    )
+    if not reuse:
+        _write_netscape_cookies(session_path, parsed_cookies)
+    os.makedirs(user_dir, exist_ok=True)
+    try:
+        shutil.copy2(session_path, os.path.join(user_dir, ".twitter-cookies.txt"))
+    except OSError:
+        _write_netscape_cookies(os.path.join(user_dir, ".twitter-cookies.txt"), parsed_cookies)
+    return session_path, reuse
+
+
+def _yield_refreshed_twitter_cookie(
+    session_path: Optional[str],
+    user_dir: Optional[str] = None,
+) -> Iterator[Dict]:
+    header = _cookie_header_from_file(session_path)
+    if not header:
+        return
+    if session_path and user_dir:
+        try:
+            shutil.copy2(session_path, os.path.join(user_dir, ".twitter-cookies.txt"))
+        except OSError:
+            pass
+    yield {
+        "type": "status",
+        "msg": "已写回更新后的 X Cookie，换账号缓存将沿用同一登录态。",
+        "cookie": header,
+    }
 
 
 def _map_gallery_dl_error(line: str) -> Optional[str]:
@@ -550,6 +669,15 @@ def _map_gallery_dl_error(line: str) -> Optional[str]:
             "2）目标为私密账号且你未关注它。\n"
             "请点「应用内登录 X」刷新 Cookie，或确认已关注该账号。"
         )
+    if "could not authenticate" in lowered or "authorizationerror" in lowered:
+        return (
+            "X 拒绝了当前登录态（常见于换账号后仍用已刷新过的旧 ct0）。\n"
+            "请点「应用内登录 X」刷新 Cookie，或从 x.com 重新复制 auth_token 和 ct0。"
+        )
+    if "account temporarily locked" in lowered:
+        return "当前 X 账号被临时锁定。请在浏览器打开 x.com 按提示解锁后再缓存。"
+    if "unable to retrieve tweets" in lowered:
+        return "无法读取该用户时间线。可能是限流、私密账号或登录态失效，请稍后再试或重新登录 X。"
     if "login rejected" in lowered:
         return "推特把这次登录判定为异常。请在应用内重新登录 X，或手动粘贴新的 auth_token。"
     if "could not find" in lowered and "cookies" in lowered:

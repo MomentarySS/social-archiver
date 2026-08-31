@@ -124,6 +124,8 @@ export function usePostCard(props: { post: Post; highlightQuery?: string }) {
 
   const weiboTime = computed(() => formatWeiboTime(parsedDate.value, props.post.created_at || props.post.date || ''))
 
+  const igTime = computed(() => formatInstagramTime(parsedDate.value, props.post.created_at || props.post.date || ''))
+
   const xTime = computed(() => formatXTime(parsedDate.value, props.post.created_at || props.post.date || ''))
 
   const weiboText = computed(() => {
@@ -343,6 +345,7 @@ export function usePostCard(props: { post: Post; highlightQuery?: string }) {
     mediaClass,
     xMediaClass,
     weiboTime,
+    igTime,
     xTime,
     weiboText,
     xText,
@@ -388,6 +391,20 @@ function formatWeiboTime(d: Date | null, fallback: string) {
     return `${d.getMonth() + 1}月${d.getDate()}日`
   }
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function formatInstagramTime(d: Date | null, fallback: string) {
+  if (!d) return stripTags(fallback)
+  const now = new Date()
+  const diff = (now.getTime() - d.getTime()) / 1000
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
+  if (diff < 604800) return `${Math.floor(diff / 86400)}天前`
+  if (d.getFullYear() === now.getFullYear()) {
+    return `${d.getMonth() + 1}月${d.getDate()}日`
+  }
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
 }
 
 function formatXTime(d: Date | null, fallback: string) {

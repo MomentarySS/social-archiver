@@ -56,6 +56,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   rebuildSearchIndex: (outputDir) => ipcRenderer.invoke('rebuild-search-index', outputDir),
   verifyArchives: (params) => ipcRenderer.invoke('verify-archives', params),
   checkCookie: (params) => ipcRenderer.invoke('check-cookie', params),
+  importBrowserCookies: (params) => ipcRenderer.invoke('import-browser-cookies', params || {}),
+  refreshInstagramSession: (params) => ipcRenderer.invoke('refresh-instagram-session', params || {}),
   getPortableInfo: () => ipcRenderer.invoke('get-portable-info'),
   getUserStats: (userDir) => ipcRenderer.invoke('get-user-stats', userDir),
   getArchiveStats: (outputDir) => ipcRenderer.invoke('get-archive-stats', outputDir),

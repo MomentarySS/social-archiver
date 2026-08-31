@@ -15,13 +15,43 @@ from backend.daterange import order_days, parse_day, parse_weibo_created_at
 from backend.metadata import download_avatar, save_post_metadata, save_profile
 
 MAX_PAGES = 200
-# Page-turn delay: m.weibo.cn is sensitive to rapid pagination.
-REQUEST_SLEEP = 2.5
-REQUEST_SLEEP_JITTER = (0.8, 2.0)
+# Page-turn delay: m.weibo.cn is sensitive to rapid pagination (see RSSHub #20512).
+REQUEST_SLEEP = 8.0
+REQUEST_SLEEP_JITTER = (2.0, 5.0)
+PAGE_BURST_EVERY = 3
+PAGE_BURST_SLEEP = (45.0, 75.0)
 WEIBO_MEDIA_WORKERS_MAX = 2
 EXISTING_STREAK_STOP = 5
 PAGE_RETRIES = 4
 PAGE_RETRY_SLEEP = (3.0, 8.0, 15.0)
+PAGE_RETRY_SLEEP_DEEP = (30.0, 60.0, 90.0)
+# One in-session cooldown, then save checkpoint — come back after 30–60 minutes.
+PAGE_COOLDOWN_RETRY = (180.0,)
+PAGE_FAIL_SWITCH_THRESHOLD = 2
+
+
+def _checkpoint_date_range(profile: Dict) -> Tuple[str, str]:
+    return (
+        str(profile.get("checkpointStartDate") or ""),
+        str(profile.get("checkpointEndDate") or ""),
+    )
+
+
+def _date_range_changed(profile: Dict, start_date: Optional[str], end_date: Optional[str]) -> bool:
+    current = (start_date or "", end_date or "")
+    if current == ("", ""):
+        return False
+    return _checkpoint_date_range(profile) != current
+
+
+def _yield_countdown(seconds: float) -> Iterator[Dict]:
+    remaining = max(0.0, float(seconds))
+    while remaining > 0:
+        chunk = min(15.0, remaining)
+        time.sleep(chunk)
+        remaining -= chunk
+        if remaining >= 1:
+            yield {"type": "status", "msg": f"等待中…剩余约 {int(remaining)} 秒"}
 
 
 def _as_dict(value) -> Dict:
@@ -85,6 +115,13 @@ def download_weibo_media(
         }
         if swapped:
             yield {"type": "status", "msg": "起始日晚于结束日，已按从早到晚对调。"}
+        yield {
+            "type": "status",
+            "msg": (
+                "微博翻页风控较严：时间线从新到旧翻，早年内容通常要翻很多页。"
+                "单次任务可能只推进几页，请多次「深度回溯」并间隔 30–60 分钟续跑。"
+            ),
+        }
 
     cookie = _normalize_cookie(cookie)
     if not cookie:
@@ -105,15 +142,14 @@ def download_weibo_media(
         "Accept": "application/json, text/plain, */*",
     }
     session = _cookie_session(cookie)
-    logged_in = _refresh_weibo_st(session, headers)
-    _warmup_weibo_profile(session, headers, user_id)
-    _sync_cookie_header(session, headers)
-    if not logged_in and not _weibo_logged_in(session, headers):
+    logged_in = _ensure_weibo_logged_in(session, headers, user_id)
+    if not logged_in:
         yield {
             "type": "error",
             "msg": (
-                "微博 Cookie 未处于登录状态，只能读到最近几条，无法翻页拉取完整时间线。"
-                "请在浏览页点「更新」时重新登录微博，或到设置页检测 Cookie 后重新登录。"
+                "微博 Cookie 未处于登录状态，无法翻页拉取完整时间线。"
+                "若刚被翻页风控打断，请等 30–60 分钟再试，不必立刻重新登录。"
+                "仍失败时再到设置页检测 Cookie 或应用内重新登录。"
             ),
         }
         return
@@ -127,13 +163,48 @@ def download_weibo_media(
     page = 1
     since_id = ""
     pagination_mode = "since_id"
-    if profile.get("fetchStatus") in ("partial", "page_limit") and not deep_backtrack:
+    page_fail_count = _safe_int(profile.get("lastPageFailCount"), 0)
+    last_fail_page = _safe_int(profile.get("lastFailPage"), 0)
+    range_changed = _date_range_changed(profile, start_date, end_date)
+    if range_changed:
+        yield {
+            "type": "status",
+            "msg": (
+                "日期范围已更新，继续从当前翻页进度扫描（只收录范围内的帖文）。"
+                "换月份不必重新登录。"
+            ),
+        }
+    elif profile.get("fetchStatus") in ("partial", "page_limit") and not deep_backtrack:
         deep_backtrack = True
         yield {"type": "status", "msg": "检测到上次未拉完，自动从断点继续。"}
-    if deep_backtrack and profile.get("fetchStatus") in ("partial", "page_limit"):
+    if not range_changed and deep_backtrack and profile.get("fetchStatus") in ("partial", "page_limit"):
         page = max(1, _safe_int(profile.get("lastPage"), 1))
         pagination_mode = str(profile.get("paginationMode") or "since_id")
-        if pagination_mode == "since_id" and profile.get("lastSinceId"):
+        if page == last_fail_page and page_fail_count >= 1:
+            since_id = ""
+            pagination_mode = "page"
+            yield {
+                "type": "status",
+                "msg": (
+                    f"第 {page} 页上次失败，已自动改用页码翻页重试。"
+                    "若仍卡住，请隔 10–30 分钟再跑。"
+                ),
+            }
+        elif (
+            pagination_mode == "since_id"
+            and page_fail_count >= PAGE_FAIL_SWITCH_THRESHOLD
+            and page == last_fail_page
+        ):
+            since_id = ""
+            pagination_mode = "page"
+            yield {
+                "type": "status",
+                "msg": (
+                    f"第 {page} 页 since_id 多次失败，已自动改用页码翻页。"
+                    "若仍卡住，可在日期范围里按年份分段缓存。"
+                ),
+            }
+        elif pagination_mode == "since_id" and profile.get("lastSinceId"):
             since_id = str(profile.get("lastSinceId") or "")
             sid_hint = f"{since_id[:12]}…" if len(since_id) > 12 else since_id
             yield {
@@ -144,7 +215,7 @@ def download_weibo_media(
             since_id = ""
             yield {
                 "type": "status",
-                "msg": f"深度回溯：从第 {page} 页断点继续",
+                "msg": f"深度回溯：从第 {page} 页断点继续（页码模式）",
             }
     elif deep_backtrack:
         yield {"type": "status", "msg": "深度回溯：将忽略「连续已缓存即停」，直至无更多页或达到页数上限。"}
@@ -162,36 +233,95 @@ def download_weibo_media(
     natural_end = False
     api_total = 0
     rate_limited = False
+    pages_since_burst = 0
+    profile_was_partial = profile.get("fetchStatus") in ("partial", "page_limit")
 
     while page <= MAX_PAGES and not reached_start and not reached_existing:
-        params = {
-            "type": "uid",
-            "value": str(user_id),
-            "containerid": f"107603{user_id}",
-        }
-        if since_id:
-            params["since_id"] = since_id
-        elif page > 1:
-            params["page"] = str(page)
+        params = _build_weibo_page_params(user_id, page, since_id)
 
         yield {"type": "status", "msg": f"正在获取微博第 {page} 页..."}
 
-        _refresh_weibo_st(session, headers)
-        data, page_error = _fetch_weibo_page(session, headers, params, page=page)
-        if page_error:
-            if page > 1:
-                rate_limited = True
+        if page > 1 and pages_since_burst >= PAGE_BURST_EVERY:
+            burst = random.uniform(*PAGE_BURST_SLEEP)
+            yield {
+                "type": "status",
+                "msg": f"已连续翻页 {PAGE_BURST_EVERY} 次，暂停 {int(burst)} 秒以降低风控…",
+            }
+            yield from _yield_countdown(burst)
+            pages_since_burst = 0
+
+        if page > 1 or not headers.get("X-XSRF-TOKEN"):
+            _refresh_weibo_st(session, headers)
+        data, page_error = _fetch_weibo_page(
+            session, headers, params, page=page, max_retries=2,
+            profile_was_partial=profile_was_partial,
+        )
+        if page_error and since_id and page > 1:
+            yield {
+                "type": "status",
+                "msg": f"since_id 翻页受阻，改用第 {page} 页页码重试…",
+            }
+            fallback_params = _build_weibo_page_params(user_id, page, "")
+            data, page_error = _fetch_weibo_page(
+                session, headers, fallback_params, page=page, max_retries=2,
+                profile_was_partial=profile_was_partial,
+            )
+            if not page_error:
+                since_id = ""
+                pagination_mode = "page"
+
+        if page_error and page > 1:
+            for cooldown_index, wait_secs in enumerate(PAGE_COOLDOWN_RETRY, start=1):
+                minutes = max(1, int(wait_secs // 60))
                 yield {
                     "type": "status",
                     "msg": (
-                        f"第 {page} 页暂时拉不到（多为翻页风控，不一定是 Cookie 失效）。"
-                        "已保存断点，等 1–2 分钟后勾选「深度回溯」再跑即可继续更早的微博。"
+                        f"第 {page} 页暂时失败，等待约 {minutes} 分钟后"
+                        f"第 {cooldown_index} 次重试…"
+                    ),
+                }
+                yield from _yield_countdown(wait_secs)
+                _refresh_weibo_st(session, headers)
+                data, page_error = _fetch_weibo_page(
+                    session, headers, params, page=page, max_retries=1,
+                    profile_was_partial=profile_was_partial,
+                )
+                if not page_error:
+                    break
+                if since_id:
+                    fallback_params = _build_weibo_page_params(user_id, page, "")
+                    data, page_error = _fetch_weibo_page(
+                        session, headers, fallback_params, page=page, max_retries=1,
+                        profile_was_partial=profile_was_partial,
+                    )
+                    if not page_error:
+                        since_id = ""
+                        pagination_mode = "page"
+                        break
+
+        if page_error:
+            if page > 1:
+                rate_limited = True
+                if page == last_fail_page:
+                    page_fail_count += 1
+                else:
+                    page_fail_count = 1
+                    last_fail_page = page
+                yield {
+                    "type": "status",
+                    "msg": (
+                        f"第 {page} 页仍拉不到（微博翻页风控，Cookie 多半仍有效）。"
+                        "已保存断点；请隔 30–60 分钟再勾「深度回溯」续跑。"
+                        "拉 2019 年内容通常要翻几十上百页，分多次完成是正常的。"
                     ),
                 }
                 break
             yield {"type": "error", "msg": page_error}
             failed = True
             break
+
+        page_fail_count = 0
+        last_fail_page = 0
 
         cardlist_info = _cardlist_info(data)
         if not api_total:
@@ -358,12 +488,17 @@ def download_weibo_media(
             "fetchStatus": "partial",
             "deepBacktrack": True,
             "lastSinceId": since_id if since_id else "",
+            "lastPageFailCount": 0,
+            "lastFailPage": 0,
+            "checkpointStartDate": start_date or "",
+            "checkpointEndDate": end_date or "",
         }
         save_profile(os.path.join(output_dir, "weibo"), user_id, checkpoint)
         yield {
             "type": "status",
             "msg": f"已缓存 {total_posts} 条原创（文字 {total_text}，含媒体 {total_posts - total_text}）",
         }
+        pages_since_burst += 1
         time.sleep(_page_sleep())
 
     if failed:
@@ -401,14 +536,20 @@ def download_weibo_media(
         "deepBacktrack": bool(deep_backtrack),
         "includeQuoted": bool(include_quoted),
         "paginationMode": pagination_mode,
+        "checkpointStartDate": start_date or "",
+        "checkpointEndDate": end_date or "",
     }
     if fetch_status == "complete":
         profile_patch["lastSinceId"] = ""
         profile_patch["lastPage"] = 0
         profile_patch["paginationMode"] = ""
+        profile_patch["lastPageFailCount"] = 0
+        profile_patch["lastFailPage"] = 0
     elif fetch_status == "partial":
         profile_patch["lastPage"] = page
         profile_patch["lastSinceId"] = since_id if pagination_mode == "since_id" else ""
+        profile_patch["lastPageFailCount"] = page_fail_count
+        profile_patch["lastFailPage"] = last_fail_page if rate_limited else 0
     save_profile(os.path.join(output_dir, "weibo"), user_id, profile_patch)
 
     extra = f"，跳过已有 {skipped_existing} 条" if skipped_existing else ""
@@ -426,7 +567,7 @@ def download_weibo_media(
         "output_dir": os.path.join(output_dir, "weibo", user_id),
     }
     refreshed_cookie = _session_cookie_string(session)
-    if refreshed_cookie and "SUB=" in refreshed_cookie and _weibo_logged_in(session, headers):
+    if refreshed_cookie and "SUB=" in refreshed_cookie:
         done_event["cookie"] = refreshed_cookie
     yield done_event
 
@@ -479,7 +620,12 @@ def _page_sleep() -> float:
     return max(1.0, delay)
 
 
-def _format_weibo_api_error(resp: requests.Response, data: Optional[Dict], page: int) -> str:
+def _format_weibo_api_error(
+    resp: requests.Response,
+    data: Optional[Dict],
+    page: int,
+    profile_was_partial: bool = False,
+) -> str:
     msg = ""
     ok = None
     if isinstance(data, dict):
@@ -497,20 +643,35 @@ def _format_weibo_api_error(resp: requests.Response, data: Optional[Dict], page:
         parts.append(f"HTTP {resp.status_code}")
     hint = f"（{'；'.join(parts)}）" if parts else ""
     if ok == -100:
-        if page > 1:
+        if page > 1 or profile_was_partial:
             return (
                 f"微博第 {page} 页暂时失败{hint}。"
-                "多半是翻页间隔触发了风控，稍后用深度回溯从断点继续即可。"
+                "多半是翻页风控，稍后用深度回溯从断点继续即可。"
             )
         return (
             f"微博第 {page} 页接口返回错误{hint}。"
-            "这通常表示 Cookie 未登录或已失效。"
-            "请重新登录微博后再试。"
+            "若刚换过日期范围或刚被风控打断，请等 30–60 分钟再试。"
+            "仍失败再重新登录微博。"
         )
     return (
         f"微博第 {page} 页接口返回错误{hint}。"
         "可先在设置页检测 Cookie；若开了代理，微博缓存会自动直连。"
     )
+
+
+def _ensure_weibo_logged_in(
+    session: requests.Session,
+    headers: Dict[str, str],
+    user_id: str,
+    retries: int = 2,
+) -> bool:
+    for attempt in range(retries):
+        _warmup_weibo_profile(session, headers, user_id)
+        if _refresh_weibo_st(session, headers):
+            return True
+        if attempt + 1 < retries:
+            time.sleep(15.0 * (attempt + 1))
+    return False
 
 
 def _cookie_session(cookie: str) -> requests.Session:
@@ -565,6 +726,24 @@ def _refresh_weibo_st(session: requests.Session, headers: Dict[str, str]) -> boo
         return False
 
 
+def _build_weibo_page_params(user_id: str, page: int, since_id: str) -> Dict[str, str]:
+    params = {
+        "type": "uid",
+        "value": str(user_id),
+        "containerid": f"107603{user_id}",
+    }
+    if since_id:
+        params["since_id"] = since_id
+    elif page > 1:
+        params["page"] = str(page)
+    return params
+
+
+def _page_retry_sleep(page: int, attempt: int) -> float:
+    sleeps = PAGE_RETRY_SLEEP if page <= 1 else PAGE_RETRY_SLEEP_DEEP
+    return sleeps[min(attempt, len(sleeps) - 1)]
+
+
 def _warmup_weibo_profile(session: requests.Session, headers: Dict[str, str], user_id: str) -> None:
     try:
         session.get(
@@ -582,10 +761,12 @@ def _fetch_weibo_page(
     headers: Dict[str, str],
     params: Dict[str, str],
     page: int = 1,
+    max_retries: Optional[int] = None,
+    profile_was_partial: bool = False,
 ) -> Tuple[Optional[Dict], Optional[str]]:
     url = "https://m.weibo.cn/api/container/getIndex"
     last_error = ""
-    retries = PAGE_RETRIES if page > 1 else 2
+    retries = max_retries if max_retries is not None else (PAGE_RETRIES if page > 1 else 2)
     for attempt in range(retries):
         try:
             resp = session.get(
@@ -597,7 +778,7 @@ def _fetch_weibo_page(
         except requests.exceptions.RequestException as e:
             last_error = f"获取第 {page} 页失败: {e}"
             if attempt + 1 < retries:
-                time.sleep(PAGE_RETRY_SLEEP[min(attempt, len(PAGE_RETRY_SLEEP) - 1)])
+                time.sleep(_page_retry_sleep(page, attempt))
                 continue
             return None, last_error
 
@@ -616,26 +797,22 @@ def _fetch_weibo_page(
         if not isinstance(data, dict):
             last_error = f"微博第 {page} 页返回了非对象 JSON。"
             if attempt + 1 < retries:
-                time.sleep(PAGE_RETRY_SLEEP[min(attempt, len(PAGE_RETRY_SLEEP) - 1)])
+                time.sleep(_page_retry_sleep(page, attempt))
                 continue
             return None, last_error
 
         if data.get("ok") == 1:
             return data, None
 
-        last_error = _format_weibo_api_error(resp, data, page)
+        last_error = _format_weibo_api_error(resp, data, page, profile_was_partial)
         if attempt + 1 < retries:
             if data.get("ok") == -100:
                 _refresh_weibo_st(session, headers)
-            time.sleep(PAGE_RETRY_SLEEP[min(attempt, len(PAGE_RETRY_SLEEP) - 1)])
+            time.sleep(_page_retry_sleep(page, attempt))
             continue
         return None, last_error
 
     return None, last_error or f"获取第 {page} 页失败"
-
-
-def _weibo_logged_in(session: requests.Session, headers: Dict[str, str]) -> bool:
-    return _refresh_weibo_st(session, headers)
 
 
 def _pagination_cursor(payload: Dict, page: int, since_id: str) -> Tuple[str, int, bool]:

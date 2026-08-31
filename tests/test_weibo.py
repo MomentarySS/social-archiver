@@ -6,7 +6,10 @@ import unittest
 from backend.weibo import (
     EXISTING_STREAK_STOP,
     _archive_post_complete,
+    _build_weibo_page_params,
+    _checkpoint_date_range,
     _collect_media,
+    _date_range_changed,
     _cookie_session,
     _format_weibo_api_error,
     _forward_has_comment,
@@ -17,6 +20,7 @@ from backend.weibo import (
     _livephoto_play_url,
     _looks_like_media,
     _pagination_cursor,
+    _page_retry_sleep,
     _pic_as_media,
     _read_user_profile,
     _session_cookie_string,
@@ -202,6 +206,27 @@ class WeiboHelpersTest(unittest.TestCase):
         session = _cookie_session("SUB=abc; MLOGIN=1")
         self.assertEqual(session.cookies.get("SUB"), "abc")
         self.assertEqual(session.cookies.get("MLOGIN"), "1")
+
+    def test_build_weibo_page_params_prefers_since_id(self):
+        params = _build_weibo_page_params("123", 5, "abc")
+        self.assertEqual(params["since_id"], "abc")
+        self.assertNotIn("page", params)
+
+    def test_build_weibo_page_params_uses_page_without_since_id(self):
+        params = _build_weibo_page_params("123", 5, "")
+        self.assertEqual(params["page"], "5")
+        self.assertNotIn("since_id", params)
+
+    def test_page_retry_sleep_is_longer_for_deep_pages(self):
+        self.assertGreater(_page_retry_sleep(5, 0), _page_retry_sleep(1, 0))
+
+    def test_date_range_changed_when_checkpoint_differs(self):
+        profile = {"checkpointStartDate": "2020-01-01", "checkpointEndDate": "2020-12-31"}
+        self.assertTrue(_date_range_changed(profile, "2019-01-01", "2019-11-30"))
+
+    def test_date_range_unchanged_allows_resume(self):
+        profile = {"checkpointStartDate": "2019-01-01", "checkpointEndDate": "2019-11-30"}
+        self.assertFalse(_date_range_changed(profile, "2019-01-01", "2019-11-30"))
 
 
 if __name__ == "__main__":

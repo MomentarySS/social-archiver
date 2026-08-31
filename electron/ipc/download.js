@@ -5,9 +5,11 @@ const { createJsonLineParser } = require('../../json-lines');
 const { scanArchives, isTwitterDerivativeUser } = require('../../electron-archives');
 const { userScheduleKey, isUserDue } = require('../../electron-scheduler');
 const { debugLog } = require('../debug');
+const { refreshInstagramCookie, readInstagramSessionFromPartition } = require('../cookie-sources');
+const { hasUsableCookie, extractCookieValue } = require('../cookie-rules');
 
 function createDownloadIpc(ctx, settingsStore, backend, notify) {
-  const { readSettings, persistWeiboCookieFromJob } = settingsStore;
+  const { readSettings, persistJobCookie } = settingsStore;
   const { spawnBackendJob, clampConcurrent, readTwitterFetchOptions, readWeiboFetchOptions, readInstagramFetchOptions } = backend;
   const { notifyDesktop, logUpdate, updateProfileLastUpdate } = notify;
 
@@ -23,6 +25,48 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
   function clearBatchRetryTimers() {
     for (const timer of ctx.batchRetryTimers) clearTimeout(timer);
     ctx.batchRetryTimers = [];
+  }
+
+  async function resolveInstagramJobCookie(job) {
+    if (job.platform !== 'instagram') {
+      return { cookie: job.cookie, refreshed: false, message: '' };
+    }
+    const current = String(job.cookie || '').trim();
+    const partition = await readInstagramSessionFromPartition();
+    if (partition.success && partition.cookie) {
+      const currentSid = extractCookieValue(current, 'sessionid');
+      const partitionSid = extractCookieValue(partition.cookie, 'sessionid');
+      if (partitionSid && currentSid === partitionSid) {
+        return { cookie: current || partition.cookie, refreshed: false, message: '' };
+      }
+      if (partitionSid) {
+        const refreshed = await refreshInstagramCookie(settingsStore, job.userId);
+        if (refreshed.refreshed && refreshed.cookie) {
+          return {
+            cookie: refreshed.cookie,
+            refreshed: true,
+            message: refreshed.message || '已从应用内登录分区更新 Instagram sessionid',
+          };
+        }
+      }
+    }
+    if (hasUsableCookie('instagram', current)) {
+      return { cookie: current, refreshed: false, message: '' };
+    }
+    const refreshed = await refreshInstagramCookie(settingsStore, job.userId);
+    if (refreshed.refreshed && refreshed.cookie) {
+      return {
+        cookie: refreshed.cookie,
+        refreshed: true,
+        message: refreshed.message || '已从应用内登录分区更新 Instagram sessionid',
+      };
+    }
+    return { cookie: current, refreshed: false, message: refreshed.message || '' };
+  }
+
+  function notifyInstagramCookieRefresh(message) {
+    if (!message) return;
+    ctx.mainWindow?.webContents.send('download:log', { msg: message });
   }
 
   function scheduleBatchRetry(job, message, userDir) {
@@ -86,10 +130,25 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
       queued: ctx.downloadQueue.length,
     });
 
+    void startBatchJob(job);
+  }
+
+  function latestJobCookie(job) {
+    const settings = readSettings();
+    const stored = cookieForUser(settings, job.platform, job.userId);
+    return hasUsableCookie(job.platform, stored) ? stored : (job.cookie || '');
+  }
+
+  async function startBatchJob(job) {
     ctx.batchProcess = null;
     let proc;
     try {
-      proc = spawnBackendJob(job);
+      const withLatest = { ...job, cookie: latestJobCookie(job) };
+      const cookieInfo = await resolveInstagramJobCookie(withLatest);
+      if (cookieInfo.refreshed) {
+        notifyInstagramCookieRefresh(cookieInfo.message);
+      }
+      proc = spawnBackendJob({ ...withLatest, cookie: cookieInfo.cookie });
       ctx.batchProcess = proc;
     } catch (err) {
       const userDir = path.join(job.outputDir, job.platform, job.userId);
@@ -110,12 +169,12 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
 
     const parser = createJsonLineParser(
       (evt) => {
+        if (evt.cookie) {
+          persistJobCookie(job.platform, job.userId, evt.cookie);
+        }
         if (evt.type === 'done') {
           evt.userDir = path.join(job.outputDir, job.platform, job.userId);
           updateProfileLastUpdate(evt.userDir);
-          if (evt.cookie) {
-            persistWeiboCookieFromJob(job.platform, job.userId, evt.cookie);
-          }
           logUpdate(job.outputDir, {
             platform: job.platform,
             userId: job.userId,
@@ -214,15 +273,6 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
     return perUser[key] || settings?.cookies?.[platform] || '';
   }
 
-  function hasUsableCookie(platform, cookie) {
-    const value = String(cookie || '').trim();
-    if (!value) return false;
-    if (platform === 'weibo') return value.includes('SUB=') || (!value.includes('=') && !value.includes(';'));
-    if (platform === 'twitter') return /auth_token=/i.test(value) && /ct0=/i.test(value);
-    if (platform === 'instagram') return /sessionid=/i.test(value) || (!value.includes('=') && !value.includes(';'));
-    return true;
-  }
-
   async function buildScheduledJobs(settings) {
     const outputDir = settings?.output_dir;
     if (!outputDir || !fs.existsSync(outputDir)) return [];
@@ -289,10 +339,14 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
     } = jobArgs;
 
     try {
+      const cookieInfo = await resolveInstagramJobCookie({ platform, userId, cookie });
+      if (cookieInfo.refreshed) {
+        notifyInstagramCookieRefresh(cookieInfo.message);
+      }
       ctx.downloadProcess = spawnBackendJob({
         platform,
         userId,
-        cookie,
+        cookie: cookieInfo.cookie,
         outputDir,
         startDate,
         endDate,
@@ -311,12 +365,12 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
 
       const parser = createJsonLineParser(
         (parsed) => {
+          if (parsed.cookie) {
+            persistJobCookie(platform, userId, parsed.cookie);
+          }
           if (parsed.type === 'done') {
             parsed.userDir = path.join(outputDir, platform, userId);
             updateProfileLastUpdate(parsed.userDir);
-            if (parsed.cookie) {
-              persistWeiboCookieFromJob(platform, userId, parsed.cookie);
-            }
             logUpdate(outputDir, {
               platform,
               userId,

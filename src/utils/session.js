@@ -23,9 +23,16 @@ export function cookieForUser(settings, platform, userId) {
 export function hasUsableCookie(platform, cookie) {
   const value = String(cookie || '').trim()
   if (!value) return false
-  if (platform === 'twitter') return /(?:^|;\s*)auth_token=/.test(value)
-  if (platform === 'instagram') return /(?:^|;\s*)sessionid=/.test(value)
-  return /\bSUB=/.test(value)
+  if (platform === 'weibo') {
+    return /\bSUB=/.test(value) || (!value.includes('=') && !value.includes(';'))
+  }
+  if (platform === 'twitter') {
+    return /(?:^|;\s*)auth_token=/i.test(value) && /(?:^|;\s*)ct0=/i.test(value)
+  }
+  if (platform === 'instagram') {
+    return /(?:^|;\s*)sessionid=/i.test(value) || (!value.includes('=') && !value.includes(';'))
+  }
+  return true
 }
 
 export function maskCookie(cookie) {
@@ -100,10 +107,8 @@ export async function savePlatformCookie(platform, cookie) {
 
 export async function saveUserCookie(platform, userId, cookie) {
   if (!window.electronAPI) return
-  const key = platformCookieKey(platform)
   await patchSettings({
     cookies: {
-      [key]: cookie || '',
       per_user: { [userCookieKey(platform, userId)]: cookie || '' },
     },
   })

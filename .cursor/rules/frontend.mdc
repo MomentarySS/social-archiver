@@ -1,6 +1,6 @@
 ---
 description: Electron 壳与 Vue 前端
-globs: src/**,electron-main.js,preload.js
+globs: src/**,electron/**,electron-main.js,preload.js,settings-merge.js,json-lines.js,electron-archives.js
 alwaysApply: false
 ---
 

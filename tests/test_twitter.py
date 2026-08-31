@@ -136,5 +136,54 @@ class TwitterReplyTests(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(posts_dir, "222.json")))
 
 
+class TwitterCookieSessionTests(unittest.TestCase):
+    def test_prepare_reuses_session_file_when_auth_token_matches(self):
+        from backend.twitter import (
+            _cookie_header_from_file,
+            _prepare_twitter_cookie_file,
+            _read_netscape_cookies,
+            _write_netscape_cookies,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            user_dir = os.path.join(tmp, "twitter", "alice")
+            os.makedirs(user_dir)
+            session_path, reused = _prepare_twitter_cookie_file(
+                tmp, user_dir, {"auth_token": "tok1", "ct0": "old"}
+            )
+            self.assertFalse(reused)
+            _write_netscape_cookies(session_path, {"auth_token": "tok1", "ct0": "fresh", "kdt": "k"})
+
+            session_path2, reused2 = _prepare_twitter_cookie_file(
+                tmp, user_dir, {"auth_token": "tok1", "ct0": "old"}
+            )
+            self.assertTrue(reused2)
+            self.assertEqual(session_path2, session_path)
+            loaded = _read_netscape_cookies(session_path2)
+            self.assertEqual(loaded["ct0"], "fresh")
+            self.assertEqual(loaded["kdt"], "k")
+            header = _cookie_header_from_file(session_path2)
+            self.assertIn("auth_token=tok1", header)
+            self.assertIn("ct0=fresh", header)
+
+    def test_prepare_overwrites_when_auth_token_changes(self):
+        from backend.twitter import _prepare_twitter_cookie_file, _read_netscape_cookies
+
+        with tempfile.TemporaryDirectory() as tmp:
+            user_dir = os.path.join(tmp, "twitter", "bob")
+            os.makedirs(user_dir)
+            _prepare_twitter_cookie_file(tmp, user_dir, {"auth_token": "tok1", "ct0": "a"})
+            _prepare_twitter_cookie_file(tmp, user_dir, {"auth_token": "tok2", "ct0": "b"})
+            loaded = _read_netscape_cookies(os.path.join(tmp, "twitter", ".session-cookies.txt"))
+            self.assertEqual(loaded["auth_token"], "tok2")
+            self.assertEqual(loaded["ct0"], "b")
+
+    def test_map_authenticate_error(self):
+        from backend.twitter import _map_gallery_dl_error
+        msg = _map_gallery_dl_error("[twitter][error] AbortExtraction: Could not authenticate you")
+        self.assertIsNotNone(msg)
+        self.assertIn("ct0", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

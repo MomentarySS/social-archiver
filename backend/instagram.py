@@ -23,6 +23,7 @@ from backend.gallery_dl_runner import (
 from backend.metadata import existing_avatar, save_post_metadata, save_profile
 
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv"}
+INSTAGRAM_RATE_LIMIT_MSG = "Instagram 请求过于频繁，已被限流。请稍后再试。"
 
 
 def download_instagram_media(
@@ -37,7 +38,7 @@ def download_instagram_media(
     include_stories: bool = False,
 ) -> Iterator[Dict]:
     """Download Instagram posts via gallery-dl, then normalize metadata for browsing."""
-    del naming_template
+    del naming_template, concurrent
     scope_parts = ["帖文"]
     if include_reels:
         scope_parts.append("Reels")
@@ -52,6 +53,17 @@ def download_instagram_media(
             "type": "status",
             "msg": "Stories 为时效内容，平台约 24 小时后可能失效；请尽快缓存。",
         }
+
+    account = (user_id or "").strip().lstrip("@")
+    if not account or re.search(r"\s", account):
+        yield {
+            "type": "error",
+            "msg": (
+                f"Instagram 用户名不能含空格：{account!r}。"
+                "请使用下划线，例如 taeyeon_ss。"
+            ),
+        }
+        return
 
     err = ensure_gallery_dl()
     if err:
@@ -70,16 +82,15 @@ def download_instagram_media(
         }
         return
 
-    user_dir = os.path.join(output_dir, "instagram", user_id)
+    user_dir = os.path.join(output_dir, "instagram", account)
     os.makedirs(user_dir, exist_ok=True)
 
-    account = (user_id or "").strip().lstrip("@")
     instagram_cfg: Dict = {
         "filename": "{sidecar_media_id:?/_/}{media_id}.{extension}",
-        "directory": ["instagram", user_id, "{date:%Y-%m-%d}"],
+        "directory": ["instagram", account, "{date:%Y-%m-%d}"],
         "size": "orig",
         "videos": True,
-        "sleep-request": "6.0-12.0",
+        "sleep-request": "12.0-24.0",
         "cookies": {"sessionid": sessionid},
         "archive": os.path.join(user_dir, ".download-archive.sqlite"),
     }
@@ -103,7 +114,7 @@ def download_instagram_media(
             "filename": "{post_id}.json",
         }
     ]
-    config = build_gallery_dl_config(output_dir, "instagram", instagram_cfg, concurrent, postprocessors)
+    config = build_gallery_dl_config(output_dir, "instagram", instagram_cfg, 1, postprocessors)
     config_path = write_gallery_dl_config(config)
 
     url = (
@@ -119,11 +130,16 @@ def download_instagram_media(
         yield {"type": "status", "msg": range_msg}
 
     stats = GalleryDlStats()
+    dl_state = {"rate_limited": False}
+
+    def map_gallery_dl_line(line: str) -> Optional[str]:
+        return _map_gallery_dl_line(line, dl_state)
+
     try:
         yield from iter_gallery_dl_download(
             cmd,
             stats,
-            _map_gallery_dl_error,
+            map_gallery_dl_line,
             "gallery-dl 失败。Instagram 需要有效的 sessionid Cookie。",
         )
     except Exception as e:
@@ -132,13 +148,27 @@ def download_instagram_media(
     finally:
         remove_gallery_dl_config(config_path)
 
+    if stats.fatal_msg and stats.total > 0:
+        yield {
+            "type": "status",
+            "msg": (
+                f"下载过程中出现警告：{stats.fatal_msg}"
+                f"（已下载 {stats.total} 个文件，将继续整理。）"
+            ),
+        }
+        stats.fatal_msg = None
+
+    if not stats.fatal_msg and stats.total == 0 and dl_state["rate_limited"]:
+        stats.fatal_msg = INSTAGRAM_RATE_LIMIT_MSG
+        yield {"type": "error", "msg": INSTAGRAM_RATE_LIMIT_MSG}
+
     if stats.fatal_msg:
         return
 
-    yield from _fetch_instagram_avatar(os.path.join(output_dir, "instagram"), user_id, account, sessionid)
+    yield from _fetch_instagram_avatar(os.path.join(output_dir, "instagram"), account, account, sessionid)
 
-    written = _normalize_instagram_archive(os.path.join(output_dir, "instagram"), user_id)
-    save_profile(os.path.join(output_dir, "instagram"), user_id, {
+    written = _normalize_instagram_archive(os.path.join(output_dir, "instagram"), account)
+    save_profile(os.path.join(output_dir, "instagram"), account, {
         "includeReels": bool(include_reels),
         "includeStories": bool(include_stories),
     })
@@ -152,7 +182,7 @@ def download_instagram_media(
         "count": stats.total,
         "skipped": stats.skipped,
         "posts": written,
-        "output_dir": os.path.join(output_dir, "instagram", user_id),
+        "output_dir": os.path.join(output_dir, "instagram", account),
     }
 
 
@@ -245,6 +275,23 @@ def _parse_sessionid(cookie: str) -> str:
     return ""
 
 
+def _is_instagram_rate_limit(line: str) -> bool:
+    lowered = line.lower()
+    return (
+        "429" in lowered
+        or "too many requests" in lowered
+        or "rate limit" in lowered
+        or "rate-limit" in lowered
+    )
+
+
+def _map_gallery_dl_line(line: str, state: Dict[str, bool]) -> Optional[str]:
+    if _is_instagram_rate_limit(line):
+        state["rate_limited"] = True
+        return None
+    return _map_gallery_dl_error(line)
+
+
 def _map_gallery_dl_error(line: str) -> Optional[str]:
     lowered = line.lower()
     if "authrequired" in lowered or "authenticated cookies needed" in lowered:
@@ -254,14 +301,29 @@ def _map_gallery_dl_error(line: str) -> Optional[str]:
         )
     if "login rejected" in lowered:
         return "Instagram 把这次登录判定为异常。请重新登录并获取新的 sessionid。"
+    if "redirect to home" in lowered or "redirect to login" in lowered:
+        return (
+            "Instagram 拒绝了这次访问（sessionid 可能已过期、无效，或被临时限流）。\n"
+            "请先在浏览器登录 instagram.com 完成验证，再重新获取 sessionid。"
+        )
     if "private" in lowered:
         return "该账号为私密账号，且登录用户未关注它。无法缓存私密账号的内容。"
-    if "not found" in lowered or "404" in lowered:
+    if "requested" in lowered and "could not be found" in lowered:
+        if "user" in lowered:
+            return "Instagram 找不到该用户。请检查用户名是否正确。"
+        # Reels / Stories / 单帖等资源缺失不应中断整次缓存
+        return None
+    if any(
+        marker in lowered
+        for marker in (
+            "requested user could not be found",
+            "unknown user",
+            "user does not exist",
+        )
+    ):
         return "Instagram 找不到该用户。请检查用户名是否正确。"
     if "challenge" in lowered or "checkpoint" in lowered:
         return "Instagram 要求额外验证（Challenge/Checkpoint）。请在浏览器中完成验证后重试。"
-    if "rate" in lowered or "too many requests" in lowered or "429" in lowered:
-        return "Instagram 请求过于频繁，已被限流。请稍后再试。"
     if "empty" in lowered or "no items" in lowered or "no posts" in lowered:
         return "该账号没有可下载的内容。"
     if "could not find" in lowered and "cookies" in lowered:
@@ -272,6 +334,53 @@ def _map_gallery_dl_error(line: str) -> Optional[str]:
             "请点「应用内登录 Instagram」，或手动粘贴 sessionid。"
         )
     return None
+
+
+_FLAT_SIDECAR_MEDIA_RE = re.compile(r"^(\d+)_(\d+)$")
+
+
+def _parse_flat_sidecar_media(stem: str) -> Optional[tuple]:
+    """Parse gallery-dl flat carousel filenames like {sidecar}_{slide}."""
+    match = _FLAT_SIDECAR_MEDIA_RE.match(stem)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _instagram_media_keys(name: str, sidecar_folder: str) -> tuple:
+    """Return (post_key, media_id, rel_filename) for a media file in a date folder."""
+    media_stem = os.path.splitext(name)[0]
+    if sidecar_folder:
+        return sidecar_folder, media_stem, f"{sidecar_folder}/{name}"
+    flat = _parse_flat_sidecar_media(media_stem)
+    if flat:
+        sidecar_id, slide_id = flat
+        return sidecar_id, slide_id, name
+    return media_stem, media_stem, name
+
+
+def _cleanup_stale_instagram_posts(user_dir: str, saved_ids_by_date: Dict[str, set]) -> None:
+    """Remove per-slide _posts JSON left over from older normalization runs."""
+    posts_root = os.path.join(user_dir, "_posts")
+    if not os.path.isdir(posts_root):
+        return
+    for date_name in os.listdir(posts_root):
+        date_posts_dir = os.path.join(posts_root, date_name)
+        if not os.path.isdir(date_posts_dir):
+            continue
+        keep = saved_ids_by_date.get(date_name, set())
+        for name in os.listdir(date_posts_dir):
+            if not name.endswith(".json"):
+                continue
+            post_id = os.path.splitext(name)[0]
+            if post_id in keep:
+                continue
+            flat = _parse_flat_sidecar_media(post_id)
+            if flat and flat[0] in keep:
+                try:
+                    os.remove(os.path.join(date_posts_dir, name))
+                except OSError:
+                    pass
 
 
 def _normalize_instagram_archive(output_dir: str, user_id: str) -> int:
@@ -308,9 +417,7 @@ def _normalize_instagram_archive(output_dir: str, user_id: str) -> int:
             if not date_folder:
                 continue
 
-            media_id = os.path.splitext(name)[0]
-            post_key = sidecar_folder or media_id
-            rel_filename = f"{sidecar_folder}/{name}" if sidecar_folder else name
+            post_key, media_id, rel_filename = _instagram_media_keys(name, sidecar_folder)
             kind = "video" if ext in VIDEO_EXTS else "image"
             media_by_post.setdefault(str(post_key), []).append({
                 "media_id": media_id,
@@ -368,11 +475,15 @@ def _normalize_instagram_archive(output_dir: str, user_id: str) -> int:
         save_profile(output_dir, user_id, {"avatar": os.path.basename(avatar)})
 
     saved = 0
+    saved_ids_by_date: Dict[str, set] = {}
     for post in posts.values():
         _finalize_instagram_post(post)
         if post.get("pics") or post.get("text"):
             save_post_metadata(output_dir, user_id, post)
+            date_key = str(post.get("date") or "unknown")
+            saved_ids_by_date.setdefault(date_key, set()).add(str(post.get("id") or ""))
             saved += 1
+    _cleanup_stale_instagram_posts(user_dir, saved_ids_by_date)
     return saved
 
 
@@ -487,11 +598,19 @@ def _resolve_instagram_filename(
             return pic["filename"]
     user_dir_hint = post.get("_user_dir")
     if user_dir_hint and date_folder != "unknown":
-        for name in (f"{sidecar_id}/{media_id}", media_id):
+        candidate_names = [f"{sidecar_id}/{media_id}", media_id]
+        if sidecar_id and sidecar_id != media_id:
+            candidate_names.insert(0, f"{sidecar_id}_{media_id}")
+        for name in candidate_names:
             for ext in MEDIA_EXTS:
                 candidate = os.path.join(user_dir_hint, date_folder, f"{name}{ext}")
                 if os.path.isfile(candidate) and _media_file_ok(candidate):
-                    rel = f"{sidecar_id}/{media_id}{ext}" if "/" in name else f"{media_id}{ext}"
+                    if "/" in name:
+                        rel = f"{sidecar_id}/{media_id}{ext}"
+                    elif name.startswith(f"{sidecar_id}_"):
+                        rel = f"{name}{ext}"
+                    else:
+                        rel = f"{media_id}{ext}"
                     return rel.replace("\\", "/")
     if sidecar_id and sidecar_id != media_id:
         return f"{sidecar_id}/{media_id}.jpg"

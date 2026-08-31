@@ -1,5 +1,4 @@
 .wb-post,
-.ig-post,
 .x-post {
   display: flex;
   gap: 10px;
@@ -497,4 +496,257 @@
   color: #fff;
   font-size: 13px;
   cursor: pointer;
+}
+
+.ig-post {
+  display: block;
+  text-align: left;
+  padding: 0;
+  background: var(--sa-surface);
+  border-bottom: 1px solid var(--sa-hairline);
+}
+
+.ig-card {
+  display: flex;
+  align-items: stretch;
+  min-height: 360px;
+  max-height: min(72vh, 520px);
+}
+
+.ig-card.is-reel,
+.ig-card.is-story {
+  max-height: min(80vh, 640px);
+}
+
+.ig-media-panel {
+  position: relative;
+  flex: 1.15;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+.ig-slide-view {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ig-media-button {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.ig-slide-view img,
+.ig-slide-view video {
+  width: 100%;
+  height: 100%;
+  max-height: min(72vh, 520px);
+  object-fit: contain;
+  display: block;
+  background: #000;
+}
+
+.ig-card.is-reel .ig-slide-view img,
+.ig-card.is-reel .ig-slide-view video,
+.ig-card.is-story .ig-slide-view img,
+.ig-card.is-story .ig-slide-view video {
+  object-fit: cover;
+  max-height: min(80vh, 640px);
+}
+
+.ig-slide-view .video-fallback {
+  width: 100%;
+  min-height: 240px;
+}
+
+.ig-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.92);
+  color: #262626;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+}
+
+.ig-nav svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ig-nav-prev {
+  left: 12px;
+}
+
+.ig-nav-next {
+  right: 12px;
+}
+
+.ig-nav:hover {
+  background: #fff;
+}
+
+.ig-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14px;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.ig-dot {
+  width: 6px;
+  height: 6px;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.45);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ig-dot.active {
+  background: #0095f6;
+}
+
+.ig-card:not(.has-media) .ig-side {
+  max-width: none;
+  flex: 1;
+  border-left: 0;
+}
+
+.ig-side {
+  flex: 0.85;
+  min-width: 200px;
+  max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--sa-hairline);
+  background: var(--sa-surface);
+}
+
+.ig-side-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--sa-hairline);
+}
+
+.ig-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--sa-avatar);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.ig-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ig-head-main {
+  min-width: 0;
+}
+
+.ig-head-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ig-username {
+  color: var(--sa-ink);
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.ig-handle {
+  display: block;
+  margin-top: 1px;
+  color: var(--sa-muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.ig-side-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+
+.ig-caption {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--sa-ink);
+  word-break: break-word;
+}
+
+.ig-caption-user {
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+.ig-caption-text .ig-topic,
+.ig-caption-text .ig-at,
+.ig-caption-text .wb-topic,
+.ig-caption-text .wb-at {
+  color: var(--sa-entity);
+}
+
+.ig-caption-empty {
+  margin: 0;
+  color: var(--sa-muted);
+  font-size: 13px;
+}
+
+.ig-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--sa-hairline);
+  font-size: 12px;
+  color: var(--sa-muted);
+}
+
+.ig-time {
+  color: var(--sa-muted);
+  font-size: 12px;
+  text-transform: lowercase;
 }
