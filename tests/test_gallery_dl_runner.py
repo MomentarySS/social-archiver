@@ -4,6 +4,7 @@ from backend.gallery_dl_runner import (
     GalleryDlStats,
     apply_date_range,
     looks_like_path,
+    normalize_concurrent,
 )
 
 
@@ -24,6 +25,11 @@ class GalleryDlRunnerTests(unittest.TestCase):
         stats = GalleryDlStats()
         self.assertEqual(stats.total, 0)
         self.assertIsNone(stats.fatal_msg)
+
+    def test_normalize_concurrent_caps_at_five(self):
+        self.assertEqual(normalize_concurrent(3), 3)
+        self.assertEqual(normalize_concurrent(10), 5)
+        self.assertEqual(normalize_concurrent(0), 1)
 
 
 if __name__ == "__main__":

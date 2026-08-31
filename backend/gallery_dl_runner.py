@@ -17,6 +17,15 @@ from backend.daterange import (
 )
 
 MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4", ".mov", ".webm", ".mkv"}
+MAX_CONCURRENT = 5
+
+
+def normalize_concurrent(concurrent: int) -> int:
+    try:
+        value = 3 if concurrent is None else int(concurrent)
+    except (TypeError, ValueError):
+        value = 3
+    return max(1, min(value, MAX_CONCURRENT))
 
 
 def gallery_dl_cmd(*extra: str) -> List[str]:
@@ -89,7 +98,7 @@ def build_gallery_dl_config(
         "downloader": {
             "retries": 3,
             "timeout": 30.0,
-            "threads": max(1, min(int(concurrent or 3), 8)),
+            "threads": normalize_concurrent(concurrent),
         },
         "output": {
             "skip": True,

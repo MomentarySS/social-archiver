@@ -34,6 +34,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "--run-gallery-dl":
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.downloader import download_media
+from backend.gallery_dl_runner import normalize_concurrent
 
 
 def _emit(event):
@@ -82,7 +83,7 @@ def _run_download_job(job):
             output_dir=job["output_dir"],
             start_date=job.get("start_date") or None,
             end_date=job.get("end_date") or None,
-            concurrent=int(job.get("concurrent") or 3),
+            concurrent=normalize_concurrent(job.get("concurrent") or 3),
             naming_template=job.get("naming_template") or None,
             deep_backtrack=bool(job.get("deep_backtrack")),
             include_replies=bool(job.get("include_replies")),
@@ -272,7 +273,7 @@ def main():
             output_dir=args.output_dir,
             start_date=args.start_date or None,
             end_date=args.end_date or None,
-            concurrent=args.concurrent,
+            concurrent=normalize_concurrent(args.concurrent),
             naming_template=args.naming_template or None,
             deep_backtrack=args.deep_backtrack,
             include_replies=args.include_replies,

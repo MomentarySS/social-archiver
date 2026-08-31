@@ -35,20 +35,43 @@ export function maskCookie(cookie) {
   return `${value.slice(0, 8)}…${value.slice(-4)}`
 }
 
+export function perUserCookiesForPlatform(settings, platform) {
+  const prefix = `${platform}:`
+  const perUser = settings?.cookies?.per_user || {}
+  return Object.entries(perUser)
+    .filter(([key, value]) => key.startsWith(prefix) && value)
+    .map(([, value]) => String(value))
+}
+
+export function effectivePlatformCookie(settings, platform) {
+  const platformCookie = cookieForPlatform(settings, platform)
+  if (platformCookie) return platformCookie
+  return perUserCookiesForPlatform(settings, platform)[0] || ''
+}
+
 export function cookieInventory(settings) {
   const cookies = settings?.cookies || {}
   const platformRows = [
     { platform: 'weibo', label: PLATFORM_LABELS.weibo },
     { platform: 'twitter', label: PLATFORM_LABELS.twitter },
     { platform: 'instagram', label: PLATFORM_LABELS.instagram },
-  ].map((row) => ({
-    kind: 'platform',
-    platform: row.platform,
-    label: row.label,
-    userId: '',
-    key: row.platform,
-    value: cookies[row.platform] || '',
-  }))
+  ].map((row) => {
+    const platformValue = cookies[row.platform] || ''
+    const userValues = perUserCookiesForPlatform(settings, row.platform)
+    const value = platformValue || userValues[0] || ''
+    const sourceUserId = !platformValue && userValues[0]
+      ? (Object.entries(cookies.per_user || {}).find(([, v]) => v === userValues[0])?.[0]?.split(':')[1] || '')
+      : ''
+    return {
+      kind: 'platform',
+      platform: row.platform,
+      label: row.label,
+      userId: '',
+      key: row.platform,
+      value,
+      sourceUserId,
+    }
+  })
   const userRows = Object.entries(cookies.per_user || {}).map(([key, value]) => {
     const idx = key.indexOf(':')
     const platform = normalizePlatform(idx >= 0 ? key.slice(0, idx) : key)
@@ -77,8 +100,12 @@ export async function savePlatformCookie(platform, cookie) {
 
 export async function saveUserCookie(platform, userId, cookie) {
   if (!window.electronAPI) return
+  const key = platformCookieKey(platform)
   await patchSettings({
-    cookies: { per_user: { [userCookieKey(platform, userId)]: cookie || '' } },
+    cookies: {
+      [key]: cookie || '',
+      per_user: { [userCookieKey(platform, userId)]: cookie || '' },
+    },
   })
 }
 

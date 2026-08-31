@@ -1,19 +1,30 @@
 <template>
   <div v-if="isDownloading || progress || result" class="download-progress">
     <div class="progress-header">
-      <span>{{ statusText }}</span>
+      <span class="progress-status">{{ statusText }}</span>
       <span v-if="progress && barPercent > 0" class="percent">{{ Math.round(barPercent) }}%</span>
     </div>
-    <div class="bar" role="progressbar" :aria-valuenow="Math.round(barPercent)" aria-valuemin="0" aria-valuemax="100">
+    <div
+      class="bar"
+      role="progressbar"
+      :aria-valuenow="Math.round(barPercent)"
+      aria-valuemin="0"
+      aria-valuemax="100"
+    >
       <i :style="{ transform: `scaleX(${Math.min(1, barPercent / 100)})` }" />
     </div>
     <div v-if="progress" class="details">
-      <div><span>当前</span><b>{{ progress.file || '处理中' }}</b></div>
-      <div v-if="progress.total && progress.total > (progress.current ?? 0)">
-        <span>媒体</span><b>{{ (progress.current ?? 0) }} / {{ progress.total }}</b>
+      <div class="detail-row">
+        <span>当前</span>
+        <b>{{ progress.file || '处理中' }}</b>
       </div>
-      <div v-if="postsCount">
-        <span>帖子</span><b>{{ postsCount }} 条</b>
+      <div v-if="progress.total && progress.total > (progress.current ?? 0)" class="detail-row">
+        <span>媒体</span>
+        <b>{{ (progress.current ?? 0) }} / {{ progress.total }}</b>
+      </div>
+      <div v-if="postsCount" class="detail-row">
+        <span>帖子</span>
+        <b>{{ postsCount }} 条</b>
       </div>
     </div>
     <p v-if="result" class="result" :class="result.error ? 'is-error' : 'is-ok'">{{ resultMessage }}</p>
@@ -75,26 +86,37 @@ const fetchStatusHint = computed(() => {
 
 <style scoped>
 .download-progress {
-  padding: 12px 0 4px;
-  border-top: 1px solid var(--sa-hairline);
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: var(--sa-radius-control);
+  background: var(--sa-field);
+  border: 1px solid var(--sa-edge);
 }
 
 .progress-header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.progress-status {
   font-size: 13px;
   font-weight: 700;
-  margin-bottom: 8px;
+  color: var(--sa-ink);
 }
 
 .percent {
   color: var(--sa-accent);
   font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .bar {
-  height: 4px;
+  height: 6px;
+  border-radius: 999px;
   background: var(--sa-hairline);
   overflow: hidden;
 }
@@ -105,34 +127,43 @@ const fetchStatusHint = computed(() => {
   width: 100%;
   transform: scaleX(0);
   transform-origin: left center;
-  background: var(--sa-accent);
+  background: linear-gradient(90deg, var(--sa-accent), color-mix(in srgb, var(--sa-accent) 70%, #fff));
+  border-radius: 999px;
   transition: transform 0.2s ease-out;
 }
 
 .details {
   margin-top: 10px;
-  font-size: 13px;
+  font-size: 12px;
 }
 
-.details div {
+.detail-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 4px;
 }
 
-.details span {
-  color: var(--sa-muted);
+.detail-row:last-child {
+  margin-bottom: 0;
 }
 
-.details b {
+.detail-row span {
+  color: var(--sa-muted);
+  flex-shrink: 0;
+}
+
+.detail-row b {
   font-weight: 500;
   text-align: right;
   word-break: break-all;
+  color: var(--sa-ink);
 }
 
 .result {
   margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--sa-hairline);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -147,7 +178,7 @@ const fetchStatusHint = computed(() => {
 
 .fetch-hint {
   margin: 8px 0 0;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--sa-muted);
 }

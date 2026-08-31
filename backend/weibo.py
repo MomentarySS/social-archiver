@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -9,12 +10,43 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import requests
 
+from backend.gallery_dl_runner import normalize_concurrent
 from backend.daterange import order_days, parse_day, parse_weibo_created_at
 from backend.metadata import download_avatar, save_post_metadata, save_profile
 
 MAX_PAGES = 200
-REQUEST_SLEEP = 1.2
+# Page-turn delay: m.weibo.cn is sensitive to rapid pagination.
+REQUEST_SLEEP = 2.5
+REQUEST_SLEEP_JITTER = (0.8, 2.0)
+WEIBO_MEDIA_WORKERS_MAX = 2
 EXISTING_STREAK_STOP = 5
+PAGE_RETRIES = 4
+PAGE_RETRY_SLEEP = (3.0, 8.0, 15.0)
+
+
+def _as_dict(value) -> Dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _response_data(payload: Optional[Dict]) -> Dict:
+    if not isinstance(payload, dict):
+        return {}
+    return _as_dict(payload.get("data"))
+
+
+def _cardlist_info(payload: Optional[Dict]) -> Dict:
+    return _as_dict(_response_data(payload).get("cardlistInfo"))
 
 
 def _read_user_profile(user_dir: str) -> Dict:
@@ -23,7 +55,8 @@ def _read_user_profile(user_dir: str) -> Dict:
         return {}
     try:
         with open(path, encoding="utf-8") as handle:
-            return json.load(handle) or {}
+            data = json.load(handle) or {}
+            return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
@@ -66,29 +99,53 @@ def download_weibo_media(
             "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 "
             "Mobile/15E148 Safari/604.1"
         ),
-        "Cookie": cookie,
         "Referer": f"https://m.weibo.cn/u/{user_id}",
         "X-Requested-With": "XMLHttpRequest",
         "MWeibo-Pwa": "1",
         "Accept": "application/json, text/plain, */*",
     }
+    session = _cookie_session(cookie)
+    logged_in = _refresh_weibo_st(session, headers)
+    _warmup_weibo_profile(session, headers, user_id)
+    _sync_cookie_header(session, headers)
+    if not logged_in and not _weibo_logged_in(session, headers):
+        yield {
+            "type": "error",
+            "msg": (
+                "微博 Cookie 未处于登录状态，只能读到最近几条，无法翻页拉取完整时间线。"
+                "请在浏览页点「更新」时重新登录微博，或到设置页检测 Cookie 后重新登录。"
+            ),
+        }
+        return
 
     os.makedirs(os.path.join(output_dir, "weibo"), exist_ok=True)
-    workers = max(1, min(int(concurrent or 3), 10))
+    workers = max(1, min(normalize_concurrent(concurrent), WEIBO_MEDIA_WORKERS_MAX))
     template = naming_template or "{post_id}_{index}"
     user_dir = os.path.join(output_dir, "weibo", str(user_id))
     profile = _read_user_profile(user_dir)
 
     page = 1
     since_id = ""
-    if deep_backtrack and profile.get("lastSinceId") and profile.get("fetchStatus") in ("partial", "page_limit"):
-        since_id = str(profile.get("lastSinceId") or "")
-        page = max(1, int(profile.get("lastPage") or 1))
-        sid_hint = f"{since_id[:12]}…" if len(since_id) > 12 else since_id
-        yield {
-            "type": "status",
-            "msg": f"深度回溯：从第 {page} 页断点继续（since_id={sid_hint}）",
-        }
+    pagination_mode = "since_id"
+    if profile.get("fetchStatus") in ("partial", "page_limit") and not deep_backtrack:
+        deep_backtrack = True
+        yield {"type": "status", "msg": "检测到上次未拉完，自动从断点继续。"}
+    if deep_backtrack and profile.get("fetchStatus") in ("partial", "page_limit"):
+        page = max(1, _safe_int(profile.get("lastPage"), 1))
+        pagination_mode = str(profile.get("paginationMode") or "since_id")
+        if pagination_mode == "since_id" and profile.get("lastSinceId"):
+            since_id = str(profile.get("lastSinceId") or "")
+            sid_hint = f"{since_id[:12]}…" if len(since_id) > 12 else since_id
+            yield {
+                "type": "status",
+                "msg": f"深度回溯：从第 {page} 页断点继续（since_id={sid_hint}）",
+            }
+        else:
+            since_id = ""
+            yield {
+                "type": "status",
+                "msg": f"深度回溯：从第 {page} 页断点继续",
+            }
     elif deep_backtrack:
         yield {"type": "status", "msg": "深度回溯：将忽略「连续已缓存即停」，直至无更多页或达到页数上限。"}
     total_downloaded = 0
@@ -103,6 +160,8 @@ def download_weibo_media(
     existing_streak = 0
     hit_page_limit = False
     natural_end = False
+    api_total = 0
+    rate_limited = False
 
     while page <= MAX_PAGES and not reached_start and not reached_existing:
         params = {
@@ -113,147 +172,141 @@ def download_weibo_media(
         if since_id:
             params["since_id"] = since_id
         elif page > 1:
-            params["page"] = page
+            params["page"] = str(page)
 
         yield {"type": "status", "msg": f"正在获取微博第 {page} 页..."}
 
-        try:
-            resp = requests.get(
-                "https://m.weibo.cn/api/container/getIndex",
-                headers=headers,
-                params=params,
-                timeout=30,
-            )
-        except requests.exceptions.RequestException as e:
-            yield {"type": "error", "msg": f"获取第 {page} 页失败: {e}"}
+        _refresh_weibo_st(session, headers)
+        data, page_error = _fetch_weibo_page(session, headers, params, page=page)
+        if page_error:
+            if page > 1:
+                rate_limited = True
+                yield {
+                    "type": "status",
+                    "msg": (
+                        f"第 {page} 页暂时拉不到（多为翻页风控，不一定是 Cookie 失效）。"
+                        "已保存断点，等 1–2 分钟后勾选「深度回溯」再跑即可继续更早的微博。"
+                    ),
+                }
+                break
+            yield {"type": "error", "msg": page_error}
             failed = True
             break
 
-        try:
-            data = resp.json()
-        except ValueError:
-            snippet = (resp.text or "")[:500] or "(empty)"
-            yield {
-                "type": "error",
-                "msg": (
-                    f"微博接口返回了非 JSON 内容（状态码 {resp.status_code}）。\n"
-                    f"内容预览: {snippet}\n"
-                    "请检查 Cookie 是否有效（需含 SUB），以及用户 ID 是否正确。"
-                ),
-            }
-            failed = True
-            break
+        cardlist_info = _cardlist_info(data)
+        if not api_total:
+            api_total = _safe_int(cardlist_info.get("total"), 0)
 
-        if data.get("ok") != 1:
-            msg = (data.get("msg") or data.get("message") or "").strip()
-            hint = f"（{msg}）" if msg else ""
-            yield {"type": "error", "msg": f"微博接口返回错误{hint}，请检查 Cookie 或用户 ID。"}
-            failed = True
-            break
-
-        cards = _iter_mblog_cards((data.get("data") or {}).get("cards") or [])
+        cards = _iter_mblog_cards(_response_data(data).get("cards"))
         if not cards:
             yield {"type": "status", "msg": "没有更多内容了。"}
             natural_end = True
             break
 
         download_jobs: List[Tuple[str, str, Dict[str, str]]] = []
-        last_mblog_id = ""
         new_on_page = 0
 
         for card in cards:
-            mblog = card.get("mblog") or {}
-            created_at = mblog.get("created_at", "unknown")
-            post_id = str(mblog.get("id") or mblog.get("mid") or "")
-            if post_id:
-                last_mblog_id = post_id
-                if post_id in seen_ids:
+            try:
+                mblog = _as_dict(card.get("mblog"))
+                created_at = mblog.get("created_at", "unknown")
+                post_id = str(mblog.get("id") or mblog.get("mid") or "")
+                if post_id:
+                    if post_id in seen_ids:
+                        continue
+                    seen_ids.add(post_id)
+                    new_on_page += 1
+
+                if not _should_include_mblog(mblog, user_id, include_quoted):
                     continue
-                seen_ids.add(post_id)
-                new_on_page += 1
 
-            if not _should_include_mblog(mblog, user_id, include_quoted):
-                continue
+                post_kind = _mblog_kind(mblog, user_id, include_quoted)
 
-            post_kind = _mblog_kind(mblog, user_id, include_quoted)
+                post_dt = parse_weibo_created_at(created_at)
+                post_day = post_dt.date() if post_dt else None
+                pinned = _is_pinned(mblog)
 
-            post_dt = parse_weibo_created_at(created_at)
-            post_day = post_dt.date() if post_dt else None
-            pinned = _is_pinned(mblog)
+                if end_dt and post_day and post_day > end_dt:
+                    continue
+                if start_dt and post_day and post_day < start_dt:
+                    if not pinned:
+                        reached_start = True
+                    continue
 
-            if end_dt and post_day and post_day > end_dt:
-                continue
-            if start_dt and post_day and post_day < start_dt:
+                date_folder = _format_date(created_at)
+                if post_id and _archive_post_complete(user_dir, date_folder, post_id):
+                    skipped_existing += 1
+                    if not deep_backtrack and not start_dt and not pinned:
+                        existing_streak += 1
+                        if existing_streak >= EXISTING_STREAK_STOP:
+                            reached_existing = True
+                            break
+                    continue
                 if not pinned:
-                    reached_start = True
-                continue
+                    existing_streak = 0
 
-            date_folder = _format_date(created_at)
-            if post_id and _archive_post_complete(user_dir, date_folder, post_id):
-                skipped_existing += 1
-                if not deep_backtrack and not start_dt and not pinned:
-                    existing_streak += 1
-                    if existing_streak >= EXISTING_STREAK_STOP:
-                        reached_existing = True
-                        break
-                continue
-            if not pinned:
-                existing_streak = 0
+                if mblog.get("isLongText") or _safe_int(mblog.get("textLength")) > 140:
+                    long_text = _fetch_long_text(session, post_id, headers)
+                    if long_text:
+                        mblog["text"] = long_text
 
-            if mblog.get("isLongText") or int(mblog.get("textLength") or 0) > 140:
-                long_text = _fetch_long_text(post_id, headers)
-                if long_text:
-                    mblog["text"] = long_text
+                user = _as_dict(mblog.get("user"))
+                if user:
+                    avatar_dest = os.path.join(output_dir, "weibo", user_id, "_avatar.jpg")
+                    avatar_url = user.get("profile_image_url") or user.get("avatar_hd") or ""
+                    if avatar_url:
+                        download_avatar(avatar_url.replace("/orj48/", "/orj180/"), avatar_dest, headers)
+                    save_profile(os.path.join(output_dir, "weibo"), user_id, {
+                        "platform": "weibo",
+                        "user_id": user_id,
+                        "name": user.get("screen_name") or user.get("name") or user_id,
+                        "screen_name": user.get("screen_name") or user_id,
+                        "verified": bool(user.get("verified")),
+                        "avatar": "_avatar.jpg" if os.path.exists(avatar_dest) else "",
+                    })
 
-            user = mblog.get("user") or {}
-            if user:
-                avatar_dest = os.path.join(output_dir, "weibo", user_id, "_avatar.jpg")
-                avatar_url = user.get("profile_image_url") or user.get("avatar_hd") or ""
-                if avatar_url:
-                    download_avatar(avatar_url.replace("/orj48/", "/orj180/"), avatar_dest, headers)
-                save_profile(os.path.join(output_dir, "weibo"), user_id, {
-                    "platform": "weibo",
-                    "user_id": user_id,
-                    "name": user.get("screen_name") or user.get("name") or user_id,
-                    "screen_name": user.get("screen_name") or user_id,
-                    "verified": bool(user.get("verified")),
-                    "avatar": "_avatar.jpg" if os.path.exists(avatar_dest) else "",
-                })
+                media_items = _collect_media(mblog)
+                if not media_items and not _plain_text(mblog.get("text") or ""):
+                    continue
 
-            media_items = _collect_media(mblog)
-            if not media_items and not _plain_text(mblog.get("text") or ""):
-                continue
+                metadata = _build_metadata(
+                    mblog, user_id, media_items, date_folder, template, post_kind, pinned=pinned,
+                )
+                save_post_metadata(os.path.join(output_dir, "weibo"), user_id, metadata)
+                total_posts += 1
+                if not media_items:
+                    total_text += 1
+                    continue
 
-            metadata = _build_metadata(
-                mblog, user_id, media_items, date_folder, template, post_kind, pinned=pinned,
-            )
-            save_post_metadata(os.path.join(output_dir, "weibo"), user_id, metadata)
-            total_posts += 1
-            if not media_items:
-                total_text += 1
-                continue
+                save_dir = os.path.join(output_dir, "weibo", user_id, date_folder)
+                os.makedirs(save_dir, exist_ok=True)
 
-            save_dir = os.path.join(output_dir, "weibo", user_id, date_folder)
-            os.makedirs(save_dir, exist_ok=True)
-
-            for item in metadata["pics"]:
-                filepath = os.path.join(save_dir, item["filename"])
-                if _media_file_ok(filepath):
-                    total_skipped += 1
-                    yield {"type": "status", "msg": f"已存在，跳过: {item['filename']}"}
-                else:
-                    download_jobs.append((item["original_url"], filepath, headers))
-                video_name = item.get("video_filename") or ""
-                video_url = item.get("video_url") or ""
-                if video_name and video_url:
-                    video_path = os.path.join(save_dir, video_name)
-                    if _media_file_ok(video_path):
+                for item in _as_list(metadata.get("pics")):
+                    item = _as_dict(item)
+                    filename = item.get("filename") or ""
+                    if not filename:
+                        continue
+                    filepath = os.path.join(save_dir, filename)
+                    if _media_file_ok(filepath):
                         total_skipped += 1
-                        yield {"type": "status", "msg": f"已存在，跳过: {video_name}"}
+                        yield {"type": "status", "msg": f"已存在，跳过: {filename}"}
                     else:
-                        download_jobs.append((video_url, video_path, headers))
+                        download_jobs.append((item.get("original_url") or "", filepath, headers))
+                    video_name = item.get("video_filename") or ""
+                    video_url = item.get("video_url") or ""
+                    if video_name and video_url:
+                        video_path = os.path.join(save_dir, video_name)
+                        if _media_file_ok(video_path):
+                            total_skipped += 1
+                            yield {"type": "status", "msg": f"已存在，跳过: {video_name}"}
+                        else:
+                            download_jobs.append((video_url, video_path, headers))
+            except Exception as e:
+                yield {"type": "status", "msg": f"跳过一条异常微博：{e}"}
+                continue
 
         if download_jobs:
+            _sync_cookie_header(session, headers)
             for event in _download_jobs(download_jobs, workers):
                 if event.get("type") == "downloaded":
                     total_downloaded += 1
@@ -281,26 +334,37 @@ def download_weibo_media(
             natural_end = True
             break
 
-        next_since = _next_since_id(data, last_mblog_id)
-        if not next_since or next_since == since_id:
-            yield {"type": "status", "msg": "没有更多内容了。"}
+        next_since, next_page, has_more = _pagination_cursor(data, page, since_id)
+        if not has_more:
+            if api_total and len(seen_ids) < api_total:
+                yield {
+                    "type": "status",
+                    "msg": (
+                        f"接口显示该用户约有 {api_total} 条微博，但当前只能读到 {len(seen_ids)} 条。"
+                        "请确认 Cookie 已登录，或稍后重试。"
+                    ),
+                }
+            else:
+                yield {"type": "status", "msg": "没有更多内容了。"}
             natural_end = True
             break
 
         since_id = next_since
-        page += 1
-        if deep_backtrack:
-            save_profile(os.path.join(output_dir, "weibo"), user_id, {
-                "lastSinceId": since_id,
-                "lastPage": page,
-                "fetchStatus": "partial",
-                "deepBacktrack": True,
-            })
+        page = next_page
+        pagination_mode = "since_id" if since_id else "page"
+        checkpoint = {
+            "lastPage": page,
+            "paginationMode": pagination_mode,
+            "fetchStatus": "partial",
+            "deepBacktrack": True,
+            "lastSinceId": since_id if since_id else "",
+        }
+        save_profile(os.path.join(output_dir, "weibo"), user_id, checkpoint)
         yield {
             "type": "status",
             "msg": f"已缓存 {total_posts} 条原创（文字 {total_text}，含媒体 {total_posts - total_text}）",
         }
-        time.sleep(REQUEST_SLEEP)
+        time.sleep(_page_sleep())
 
     if failed:
         return
@@ -315,10 +379,18 @@ def download_weibo_media(
             ),
         }
 
-    if natural_end or reached_start or (reached_existing and not deep_backtrack):
-        fetch_status = "complete"
-    elif hit_page_limit:
+    history_incomplete = bool(
+        api_total
+        and len(seen_ids) < api_total
+        and not reached_start
+        and not reached_existing
+    )
+    if hit_page_limit:
         fetch_status = "page_limit"
+    elif rate_limited or history_incomplete or (deep_backtrack and not natural_end and not reached_start):
+        fetch_status = "partial"
+    elif natural_end or reached_start or (reached_existing and not deep_backtrack):
+        fetch_status = "complete"
     elif deep_backtrack:
         fetch_status = "partial"
     else:
@@ -328,13 +400,15 @@ def download_weibo_media(
         "fetchStatus": fetch_status,
         "deepBacktrack": bool(deep_backtrack),
         "includeQuoted": bool(include_quoted),
+        "paginationMode": pagination_mode,
     }
     if fetch_status == "complete":
         profile_patch["lastSinceId"] = ""
         profile_patch["lastPage"] = 0
-    elif deep_backtrack and since_id:
-        profile_patch["lastSinceId"] = since_id
+        profile_patch["paginationMode"] = ""
+    elif fetch_status == "partial":
         profile_patch["lastPage"] = page
+        profile_patch["lastSinceId"] = since_id if pagination_mode == "since_id" else ""
     save_profile(os.path.join(output_dir, "weibo"), user_id, profile_patch)
 
     extra = f"，跳过已有 {skipped_existing} 条" if skipped_existing else ""
@@ -342,7 +416,8 @@ def download_weibo_media(
         "type": "status",
         "msg": f"完成：共缓存 {total_posts} 条原创微博（文字 {total_text}，媒体文件 {total_downloaded}）{extra}",
     }
-    yield {
+    _sync_cookie_header(session, headers)
+    done_event = {
         "type": "done",
         "count": total_downloaded,
         "skipped": total_skipped,
@@ -350,6 +425,10 @@ def download_weibo_media(
         "fetch_status": fetch_status,
         "output_dir": os.path.join(output_dir, "weibo", user_id),
     }
+    refreshed_cookie = _session_cookie_string(session)
+    if refreshed_cookie and "SUB=" in refreshed_cookie and _weibo_logged_in(session, headers):
+        done_event["cookie"] = refreshed_cookie
+    yield done_event
 
 
 def _archive_post_complete(user_dir: str, date_folder: str, post_id: str) -> bool:
@@ -364,7 +443,12 @@ def _archive_post_complete(user_dir: str, date_folder: str, post_id: str) -> boo
             metadata = json.load(handle) or {}
     except Exception:
         return False
-    for item in metadata.get("pics") or []:
+    if not isinstance(metadata, dict):
+        return False
+    for item in _as_list(metadata.get("pics")):
+        item = _as_dict(item)
+        if not item:
+            continue
         folder = item.get("date_folder") or date_folder
         name = item.get("filename") or ""
         if name and not _media_file_ok(os.path.join(user_dir, folder, name)):
@@ -375,24 +459,199 @@ def _archive_post_complete(user_dir: str, date_folder: str, post_id: str) -> boo
     return True
 
 
-def _iter_mblog_cards(cards: List[Dict]) -> List[Dict]:
+def _iter_mblog_cards(cards) -> List[Dict]:
     found: List[Dict] = []
-    for card in cards or []:
+    for card in _as_list(cards):
+        card = _as_dict(card)
+        if not card:
+            continue
         if card.get("mblog") and str(card.get("card_type") or "") == "9":
             found.append(card)
-        for nested in card.get("card_group") or []:
+        for nested in _as_list(card.get("card_group")):
+            nested = _as_dict(nested)
             if nested.get("mblog") and str(nested.get("card_type") or "") == "9":
                 found.append(nested)
     return found
 
 
-def _next_since_id(payload: Dict, last_mblog_id: str) -> str:
-    info = ((payload.get("data") or {}).get("cardlistInfo") or {})
-    raw = info.get("since_id") or info.get("max_id") or last_mblog_id
-    if raw in (None, "", 0, "0"):
-        raw = last_mblog_id
-    text = str(raw or "").strip()
-    return "" if text in {"", "0", "None"} else text
+def _page_sleep() -> float:
+    delay = REQUEST_SLEEP + random.uniform(*REQUEST_SLEEP_JITTER)
+    return max(1.0, delay)
+
+
+def _format_weibo_api_error(resp: requests.Response, data: Optional[Dict], page: int) -> str:
+    msg = ""
+    ok = None
+    if isinstance(data, dict):
+        msg = (data.get("msg") or data.get("message") or "").strip()
+        ok = data.get("ok")
+    errno = data.get("errno") if isinstance(data, dict) else None
+    parts = []
+    if msg:
+        parts.append(msg)
+    if ok not in (None, "", 1):
+        parts.append(f"ok={ok}")
+    if errno not in (None, "", 0):
+        parts.append(f"errno={errno}")
+    if resp.status_code != 200:
+        parts.append(f"HTTP {resp.status_code}")
+    hint = f"（{'；'.join(parts)}）" if parts else ""
+    if ok == -100:
+        if page > 1:
+            return (
+                f"微博第 {page} 页暂时失败{hint}。"
+                "多半是翻页间隔触发了风控，稍后用深度回溯从断点继续即可。"
+            )
+        return (
+            f"微博第 {page} 页接口返回错误{hint}。"
+            "这通常表示 Cookie 未登录或已失效。"
+            "请重新登录微博后再试。"
+        )
+    return (
+        f"微博第 {page} 页接口返回错误{hint}。"
+        "可先在设置页检测 Cookie；若开了代理，微博缓存会自动直连。"
+    )
+
+
+def _cookie_session(cookie: str) -> requests.Session:
+    session = requests.Session()
+    for part in cookie.split(";"):
+        part = part.strip()
+        if "=" not in part:
+            continue
+        name, value = part.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if not name:
+            continue
+        session.cookies.set(name, value)
+    return session
+
+
+def _sync_cookie_header(session: requests.Session, headers: Dict[str, str]) -> None:
+    parts = [f"{item.name}={item.value}" for item in session.cookies]
+    if parts:
+        headers["Cookie"] = "; ".join(parts)
+
+
+def _session_cookie_string(session: requests.Session) -> str:
+    parts: List[str] = []
+    seen = set()
+    for item in session.cookies:
+        name = (item.name or "").strip()
+        value = (item.value or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        parts.append(f"{name}={value}")
+    return "; ".join(parts)
+
+
+def _refresh_weibo_st(session: requests.Session, headers: Dict[str, str]) -> bool:
+    try:
+        resp = session.get(
+            "https://m.weibo.cn/api/config",
+            headers={key: value for key, value in headers.items() if key.lower() != "cookie"},
+            timeout=15,
+        )
+        data = resp.json() if resp.content else {}
+        inner = _as_dict(data.get("data") if isinstance(data, dict) else None)
+        st = inner.get("st")
+        if st:
+            headers["X-XSRF-TOKEN"] = str(st)
+        _sync_cookie_header(session, headers)
+        return bool(inner.get("login"))
+    except Exception:
+        return False
+
+
+def _warmup_weibo_profile(session: requests.Session, headers: Dict[str, str], user_id: str) -> None:
+    try:
+        session.get(
+            f"https://m.weibo.cn/u/{user_id}",
+            headers={key: value for key, value in headers.items() if key.lower() != "cookie"},
+            timeout=20,
+        )
+        _sync_cookie_header(session, headers)
+    except Exception:
+        pass
+
+
+def _fetch_weibo_page(
+    session: requests.Session,
+    headers: Dict[str, str],
+    params: Dict[str, str],
+    page: int = 1,
+) -> Tuple[Optional[Dict], Optional[str]]:
+    url = "https://m.weibo.cn/api/container/getIndex"
+    last_error = ""
+    retries = PAGE_RETRIES if page > 1 else 2
+    for attempt in range(retries):
+        try:
+            resp = session.get(
+                url,
+                headers={key: value for key, value in headers.items() if key.lower() != "cookie"},
+                params=params,
+                timeout=30,
+            )
+        except requests.exceptions.RequestException as e:
+            last_error = f"获取第 {page} 页失败: {e}"
+            if attempt + 1 < retries:
+                time.sleep(PAGE_RETRY_SLEEP[min(attempt, len(PAGE_RETRY_SLEEP) - 1)])
+                continue
+            return None, last_error
+
+        _sync_cookie_header(session, headers)
+
+        try:
+            data = resp.json()
+        except ValueError:
+            snippet = (resp.text or "")[:500] or "(empty)"
+            return None, (
+                f"微博接口返回了非 JSON 内容（状态码 {resp.status_code}）。\n"
+                f"内容预览: {snippet}\n"
+                "请检查 Cookie 是否有效（需含 SUB），以及用户 ID 是否正确。"
+            )
+
+        if not isinstance(data, dict):
+            last_error = f"微博第 {page} 页返回了非对象 JSON。"
+            if attempt + 1 < retries:
+                time.sleep(PAGE_RETRY_SLEEP[min(attempt, len(PAGE_RETRY_SLEEP) - 1)])
+                continue
+            return None, last_error
+
+        if data.get("ok") == 1:
+            return data, None
+
+        last_error = _format_weibo_api_error(resp, data, page)
+        if attempt + 1 < retries:
+            if data.get("ok") == -100:
+                _refresh_weibo_st(session, headers)
+            time.sleep(PAGE_RETRY_SLEEP[min(attempt, len(PAGE_RETRY_SLEEP) - 1)])
+            continue
+        return None, last_error
+
+    return None, last_error or f"获取第 {page} 页失败"
+
+
+def _weibo_logged_in(session: requests.Session, headers: Dict[str, str]) -> bool:
+    return _refresh_weibo_st(session, headers)
+
+
+def _pagination_cursor(payload: Dict, page: int, since_id: str) -> Tuple[str, int, bool]:
+    """Return the next (since_id, page, has_more) for timeline pagination."""
+    info = _cardlist_info(payload)
+    raw_since = info.get("since_id") if info.get("since_id") not in (None, "", 0, "0") else info.get("max_id")
+    if raw_since not in (None, "", 0, "0"):
+        next_since = str(raw_since).strip()
+        if next_since and next_since != since_id:
+            return next_since, page + 1, True
+        return "", page, False
+
+    api_page = _safe_int(info.get("page"), 0)
+    if api_page > page:
+        return "", api_page, True
+    return "", page, False
 
 
 def _is_pinned(mblog: Dict) -> bool:
@@ -408,8 +667,8 @@ def _is_original(mblog: Dict, user_id: str) -> bool:
     if mblog.get("retweeted_status"):
         return False
     owner = str(
-        (mblog.get("user") or {}).get("id")
-        or (mblog.get("user") or {}).get("idstr")
+        _as_dict(mblog.get("user")).get("id")
+        or _as_dict(mblog.get("user")).get("idstr")
         or ""
     )
     return not owner or owner == str(user_id)
@@ -417,7 +676,7 @@ def _is_original(mblog: Dict, user_id: str) -> bool:
 
 def _forward_has_comment(mblog: Dict) -> bool:
     text = _plain_text(mblog.get("text") or "")
-    inner = mblog.get("retweeted_status") or {}
+    inner = _as_dict(mblog.get("retweeted_status"))
     inner_text = _plain_text(inner.get("text") or "")
     if not inner_text:
         return bool(text.strip())
@@ -443,12 +702,14 @@ def _mblog_kind(mblog: Dict, user_id: str, include_quoted: bool) -> str:
 
 
 def _quoted_from_weibo(mblog: Dict) -> str:
-    inner = mblog.get("retweeted_status") or {}
-    user = inner.get("user") or {}
+    inner = _as_dict(mblog.get("retweeted_status"))
+    user = _as_dict(inner.get("user"))
     return str(user.get("screen_name") or user.get("name") or "")
 
 
 def _plain_text(html: str) -> str:
+    if not isinstance(html, str):
+        html = "" if html is None else str(html)
     text = re.sub(r"<br\s*/?>", "\n", html or "", flags=re.I)
     text = re.sub(r"<[^>]+>", "", text)
     return unescape(text).replace("\xa0", " ").strip()
@@ -463,18 +724,20 @@ def _normalize_cookie(cookie: str) -> str:
     return cookie
 
 
-def _fetch_long_text(post_id: str, headers: Dict[str, str]) -> Optional[str]:
+def _fetch_long_text(session: requests.Session, post_id: str, headers: Dict[str, str]) -> Optional[str]:
     if not post_id:
         return None
     try:
-        resp = requests.get(
+        resp = session.get(
             "https://m.weibo.cn/statuses/extend",
-            headers=headers,
+            headers={key: value for key, value in headers.items() if key.lower() != "cookie"},
             params={"id": post_id},
             timeout=20,
         )
         data = resp.json()
-        text = (data.get("data") or {}).get("longTextContent") or ""
+        if not isinstance(data, dict):
+            return None
+        text = _as_dict(data.get("data")).get("longTextContent") or ""
         return text or None
     except Exception:
         return None
@@ -486,10 +749,10 @@ def _collect_media(mblog: Dict) -> List[Dict]:
 
     def add(kind: str, url: str, video_url: str = "") -> None:
         url = _upgrade_media_url("image" if kind != "video" else "video", url)
-        video_url = _livephoto_play_url(video_url)
+        video_url = (video_url or "").strip().replace("http://", "https://")
         if kind == "livephoto" and not url and video_url:
             kind = "video"
-            url = video_url
+            url = _livephoto_play_url(video_url) or video_url
             video_url = ""
         if not url or url in seen:
             return
@@ -499,28 +762,27 @@ def _collect_media(mblog: Dict) -> List[Dict]:
             kind = "livephoto"
         items.append({"type": kind, "url": url, "video_url": video_url})
 
-    pic_infos = mblog.get("pic_infos") or {}
-    for pid in mblog.get("pic_ids") or []:
-        info = pic_infos.get(pid) or {}
-        add(*_pic_as_media(info))
+    pic_infos = _as_dict(mblog.get("pic_infos"))
+    for pid in _as_list(mblog.get("pic_ids")):
+        add(*_pic_as_media(pic_infos.get(pid)))
 
-    for pic in mblog.get("pics") or []:
+    for pic in _as_list(mblog.get("pics")):
         add(*_pic_as_media(pic))
 
-    for raw in (mblog.get("mix_media_info") or {}).get("items") or []:
-        data = raw.get("data") or {}
-        kind = raw.get("type")
+    for raw in _as_list(_as_dict(mblog.get("mix_media_info")).get("items")):
+        data = _as_dict(raw.get("data") if isinstance(raw, dict) else None)
+        kind = raw.get("type") if isinstance(raw, dict) else None
         if kind == "pic":
             add(*_pic_as_media(data))
         elif kind == "video":
-            media = data.get("media_info") or data
+            media = _as_dict(data.get("media_info")) or data
             add("video", media.get("stream_url_hd") or media.get("stream_url") or "")
 
-    page_info = mblog.get("page_info") or {}
+    page_info = _as_dict(mblog.get("page_info"))
     page_type = str(page_info.get("type") or page_info.get("object_type") or "")
     if "video" in page_type or page_info.get("media_info"):
-        media = page_info.get("media_info") or {}
-        urls = page_info.get("urls") or {}
+        media = _as_dict(page_info.get("media_info"))
+        urls = _as_dict(page_info.get("urls"))
         add(
             "video",
             media.get("stream_url_hd")
@@ -534,13 +796,16 @@ def _collect_media(mblog: Dict) -> List[Dict]:
     return items
 
 
-def _pic_as_media(pic: Dict) -> Tuple[str, str, str]:
+def _pic_as_media(pic) -> Tuple[str, str, str]:
+    if not isinstance(pic, dict):
+        url = str(pic or "").strip()
+        return ("image", url, "") if url else ("image", "", "")
     still = _pic_source_url(pic)
-    pic_type = str((pic or {}).get("type") or "").lower()
+    pic_type = str(pic.get("type") or "").lower()
     live = (
-        (pic or {}).get("videoSrc")
-        or (pic or {}).get("video_src")
-        or ((pic or {}).get("video") if pic_type == "livephoto" else "")
+        pic.get("videoSrc")
+        or pic.get("video_src")
+        or (pic.get("video") if pic_type == "livephoto" else "")
         or ""
     )
     live = str(live or "")
@@ -549,14 +814,26 @@ def _pic_as_media(pic: Dict) -> Tuple[str, str, str]:
     return "image", still, ""
 
 
+def _is_livephoto_motion_url(raw: str) -> bool:
+    raw = (raw or "").strip().replace("http://", "https://")
+    if not raw:
+        return False
+    inner = _livephoto_inner_url(raw)
+    if not inner:
+        return False
+    lowered = inner.lower()
+    path = urlparse(inner).path.lower()
+    return "livephoto" in lowered or path.endswith(".mov")
+
+
 def _livephoto_inner_url(raw: str) -> str:
     raw = (raw or "").strip().replace("http://", "https://")
     if not raw:
         return ""
     live = (parse_qs(urlparse(raw).query).get("livephoto") or [""])[0]
     if live:
-        return unquote(live).replace("http://", "https://").split("?", 1)[0]
-    return raw.split("?", 1)[0]
+        return unquote(live).replace("http://", "https://")
+    return raw
 
 
 def _livephoto_play_url(raw: str) -> str:
@@ -564,10 +841,9 @@ def _livephoto_play_url(raw: str) -> str:
     inner = _livephoto_inner_url(raw)
     if not inner:
         return ""
-    lowered = inner.lower()
-    if "livephoto" in lowered or lowered.endswith(".mov"):
+    if _is_livephoto_motion_url(inner):
         return "https://video.weibo.com/media/play?livephoto=" + quote(inner, safe="")
-    return (raw or "").strip().replace("http://", "https://")
+    return inner
 
 
 def _livephoto_video_url(raw: str) -> str:
@@ -623,7 +899,7 @@ def _image_url_candidates(url: str) -> List[str]:
     return found + extras
 
 
-def _headers_for_media(url: str, api_headers: Dict[str, str]) -> Dict[str, str]:
+def _headers_for_media(url: str, api_headers: Dict[str, str], *, include_cookie: bool = False) -> Dict[str, str]:
     ua = api_headers.get("User-Agent") or (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -635,11 +911,14 @@ def _headers_for_media(url: str, api_headers: Dict[str, str]) -> Dict[str, str]:
         or "video.weibo.com" in lowered
         or re.search(r"\.(jpg|jpeg|png|gif|webp|mov)(\?|$)", lowered)
     ):
-        return {
+        headers = {
             "User-Agent": ua,
             "Referer": "https://weibo.com/",
             "Accept": "image/avif,image/webp,image/apng,image/*,video/*,*/*;q=0.8",
         }
+        if include_cookie and api_headers.get("Cookie"):
+            headers["Cookie"] = api_headers["Cookie"]
+        return headers
     headers = {
         "User-Agent": ua,
         "Referer": "https://m.weibo.cn/",
@@ -681,9 +960,9 @@ def _build_metadata(
             entry["type"] = "livephoto"
         pics.append(entry)
 
-    user = mblog.get("user") or {}
+    user = _as_dict(mblog.get("user"))
     text = mblog.get("text", "") or ""
-    page_info = mblog.get("page_info") or {}
+    page_info = _as_dict(mblog.get("page_info"))
     page_type = str(page_info.get("type") or page_info.get("object_type") or "").lower()
     if page_info and "video" not in page_type:
         card_title = (page_info.get("page_title") or page_info.get("content1") or "").strip()
@@ -703,9 +982,9 @@ def _build_metadata(
         "verified": bool(user.get("verified")),
         "original": post_kind != "quote",
         "kind": "media" if pics else "text",
-        "reposts": int(mblog.get("reposts_count") or 0),
-        "comments": int(mblog.get("comments_count") or 0),
-        "likes": int(mblog.get("attitudes_count") or 0),
+        "reposts": _safe_int(mblog.get("reposts_count")),
+        "comments": _safe_int(mblog.get("comments_count")),
+        "likes": _safe_int(mblog.get("attitudes_count")),
         "pics": pics,
     }
     if pinned:
@@ -714,7 +993,7 @@ def _build_metadata(
         meta["kind"] = "quote"
         meta["original"] = False
         meta["quoted_from_user"] = _quoted_from_weibo(mblog)
-        inner = mblog.get("retweeted_status") or {}
+        inner = _as_dict(mblog.get("retweeted_status"))
         quoted_id = str(inner.get("id") or inner.get("mid") or "")
         if quoted_id:
             meta["quoted_from_id"] = quoted_id
@@ -746,41 +1025,44 @@ def _download_one(url: str, filepath: str, headers: Dict[str, str]) -> Dict:
     )
     candidates = _image_url_candidates(url) if is_image else _video_url_candidates(url)
     last_err = "下载失败"
+    is_livephoto = not is_image and _is_livephoto_motion_url(url)
+    header_modes = (False, True) if is_livephoto else (False,)
     for candidate in candidates[:8]:
-        wrote = False
-        try:
-            resp = requests.get(
-                candidate,
-                headers=_headers_for_media(candidate, headers),
-                timeout=60,
-                stream=True,
-            )
-            if resp.status_code != 200:
-                last_err = f"HTTP {resp.status_code}"
-                continue
-            content_type = (resp.headers.get("Content-Type") or "").lower()
-            if "text/html" in content_type or "application/json" in content_type:
-                last_err = "接口返回了非媒体内容"
-                continue
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            with open(filepath, "wb") as handle:
-                for chunk in resp.iter_content(65536):
-                    if not chunk:
-                        continue
-                    if not wrote and not _looks_like_media(chunk):
-                        last_err = "接口返回了非媒体内容"
-                        wrote = False
-                        break
-                    handle.write(chunk)
-                    wrote = True
-            if wrote and _media_file_ok(filepath):
-                return {"type": "downloaded", "file": filename}
-            if wrote:
-                last_err = "空文件或损坏"
-            _remove_if_invalid(filepath)
-        except Exception as e:
-            last_err = str(e)
-            _remove_if_invalid(filepath)
+        for include_cookie in header_modes:
+            wrote = False
+            try:
+                resp = requests.get(
+                    candidate,
+                    headers=_headers_for_media(candidate, headers, include_cookie=include_cookie),
+                    timeout=60,
+                    stream=True,
+                )
+                if resp.status_code != 200:
+                    last_err = f"HTTP {resp.status_code}"
+                    continue
+                content_type = (resp.headers.get("Content-Type") or "").lower()
+                if "text/html" in content_type or "application/json" in content_type:
+                    last_err = "接口返回了非媒体内容"
+                    continue
+                os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                with open(filepath, "wb") as handle:
+                    for chunk in resp.iter_content(65536):
+                        if not chunk:
+                            continue
+                        if not wrote and not _looks_like_media(chunk):
+                            last_err = "接口返回了非媒体内容"
+                            wrote = False
+                            break
+                        handle.write(chunk)
+                        wrote = True
+                if wrote and _media_file_ok(filepath):
+                    return {"type": "downloaded", "file": filename}
+                if wrote:
+                    last_err = "空文件或损坏"
+                _remove_if_invalid(filepath)
+            except Exception as e:
+                last_err = str(e)
+                _remove_if_invalid(filepath)
     return {"type": "failed", "file": filename, "msg": last_err}
 
 
@@ -788,6 +1070,8 @@ def _looks_like_media(head: bytes) -> bool:
     if not head:
         return False
     if head[:1] in (b"{", b"<", b"["):
+        return False
+    if head.startswith(b"#EXTM3U") or head.startswith(b"#EXT-X-"):
         return False
     if head.startswith(b"\xff\xd8\xff") or head.startswith(b"\x89PNG") or head.startswith(b"GIF8"):
         return True
@@ -823,8 +1107,10 @@ def _media_file_ok(filepath: str) -> bool:
 
 def _video_url_candidates(url: str) -> List[str]:
     found: List[str] = []
+    direct = (url or "").strip().replace("http://", "https://")
+    inner = _livephoto_inner_url(url).replace("http://", "https://") if url else ""
     play = _livephoto_play_url(url)
-    for candidate in (play, (url or "").replace("http://", "https://")):
+    for candidate in (play, inner, direct):
         if candidate and candidate not in found:
             found.append(candidate)
     return found

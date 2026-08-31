@@ -31,10 +31,20 @@ def check_weibo_cookie(cookie: str) -> Dict:
             timeout=15,
         )
         data = resp.json()
-        if data.get("ok") == 1:
-            return _result(True, "Cookie 有效")
-        msg = (data.get("msg") or data.get("message") or "").strip()
-        return _result(False, msg or "Cookie 可能已失效")
+        if not isinstance(data, dict):
+            return _result(False, "接口返回异常，Cookie 可能已失效")
+        inner = data.get("data") if isinstance(data.get("data"), dict) else {}
+        if data.get("ok") == 1 and inner.get("login") is True:
+            return _result(True, "Cookie 有效，已登录")
+        if data.get("ok") == 1 and inner.get("login") is False:
+            return _result(
+                False,
+                "Cookie 未处于登录状态，只能读到最近几条微博，无法翻页拉取完整时间线。请重新登录。",
+            )
+        msg = data.get("msg") or data.get("message") or ""
+        if not isinstance(msg, str):
+            msg = str(msg) if msg else ""
+        return _result(False, msg.strip() or "Cookie 可能已失效")
     except requests.exceptions.RequestException as e:
         return _result(False, f"网络错误: {e}")
     except ValueError:
@@ -115,7 +125,10 @@ def check_instagram_cookie(cookie: str) -> Dict:
         )
         if resp.status_code == 200:
             data = resp.json()
-            user = (data.get("user") or {}) if isinstance(data, dict) else {}
+            user = {}
+            if isinstance(data, dict):
+                raw_user = data.get("user")
+                user = raw_user if isinstance(raw_user, dict) else {}
             if user.get("username"):
                 return _result(True, f"Cookie 有效（@{user.get('username')}）")
             return _result(True, "Cookie 有效")

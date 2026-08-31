@@ -12,14 +12,36 @@ class CookieCheckTest(unittest.TestCase):
 
     @patch("backend.cookie_check.requests.get")
     def test_weibo_valid_response(self, mock_get):
-        mock_get.return_value.json.return_value = {"ok": 1}
+        mock_get.return_value.json.return_value = {"ok": 1, "data": {"login": True}}
         mock_get.return_value.status_code = 200
         result = check_weibo_cookie("SUB=abc")
         self.assertTrue(result["valid"])
 
     @patch("backend.cookie_check.requests.get")
+    def test_weibo_not_logged_in(self, mock_get):
+        mock_get.return_value.json.return_value = {"ok": 1, "data": {"login": False}}
+        mock_get.return_value.status_code = 200
+        result = check_weibo_cookie("SUB=abc")
+        self.assertFalse(result["valid"])
+        self.assertIn("未处于登录状态", result["message"])
+
+    @patch("backend.cookie_check.requests.get")
     def test_weibo_invalid_response(self, mock_get):
         mock_get.return_value.json.return_value = {"ok": 0, "msg": "登录失效"}
+        mock_get.return_value.status_code = 200
+        result = check_weibo_cookie("SUB=abc")
+        self.assertFalse(result["valid"])
+
+    @patch("backend.cookie_check.requests.get")
+    def test_weibo_string_data_field(self, mock_get):
+        mock_get.return_value.json.return_value = {"ok": 1, "data": "bad"}
+        mock_get.return_value.status_code = 200
+        result = check_weibo_cookie("SUB=abc")
+        self.assertFalse(result["valid"])
+
+    @patch("backend.cookie_check.requests.get")
+    def test_weibo_non_object_json(self, mock_get):
+        mock_get.return_value.json.return_value = ["oops"]
         mock_get.return_value.status_code = 200
         result = check_weibo_cookie("SUB=abc")
         self.assertFalse(result["valid"])

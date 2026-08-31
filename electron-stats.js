@@ -22,6 +22,7 @@ function collectUserStats(userDir) {
     earliestDate: '',
     latestDate: '',
     lastUpdate: readProfile(userDir).lastUpdate || '',
+    fetchStatus: readProfile(userDir).fetchStatus || '',
   };
   const postsRoot = path.join(userDir, '_posts');
   if (!fs.existsSync(postsRoot)) return stats;

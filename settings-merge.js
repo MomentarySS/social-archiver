@@ -41,6 +41,9 @@ function applySettingsPatch(current, patch) {
   if (patch.ffmpeg && typeof patch.ffmpeg === 'object') {
     next.ffmpeg = { ...(base.ffmpeg || {}), ...patch.ffmpeg };
   }
+  if (patch.notifications && typeof patch.notifications === 'object') {
+    next.notifications = { ...(base.notifications || {}), ...patch.notifications };
+  }
   return next;
 }
 

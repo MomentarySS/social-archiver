@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, session, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, session, Notification, Menu } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -114,6 +114,50 @@ function readSettings() {
   return defaults;
 }
 
+function getProxyUrl() {
+  return String(readSettings().proxy_url || '').trim();
+}
+
+function stripProxyEnv(env) {
+  const next = { ...env };
+  for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy']) {
+    delete next[key];
+  }
+  return next;
+}
+
+function buildBackendEnv(platform) {
+  let env = { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' };
+  if (app.isPackaged) {
+    delete env.PYTHONHOME;
+    delete env.PYTHONPATH;
+  }
+  // Weibo is domestic; bypass user/system proxy to avoid page-2 API failures.
+  if (platform === 'weibo') {
+    return stripProxyEnv(env);
+  }
+  return applyProxyEnv(env);
+}
+
+function applyProxyEnv(env) {
+  const proxyUrl = getProxyUrl();
+  if (!proxyUrl) return env;
+  return {
+    ...env,
+    HTTP_PROXY: proxyUrl,
+    HTTPS_PROXY: proxyUrl,
+    ALL_PROXY: proxyUrl,
+    http_proxy: proxyUrl,
+    https_proxy: proxyUrl,
+  };
+}
+
+async function applySessionProxy(sess) {
+  const proxyUrl = getProxyUrl();
+  if (!proxyUrl || !sess?.setProxy) return;
+  await sess.setProxy({ proxyRules: proxyUrl });
+}
+
 function writeSettingsFile(settings) {
   const configPath = getSettingsPath();
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -129,6 +173,22 @@ async function saveSettingsPatch(patch) {
   });
   settingsWrite = run.then(() => {}, () => {});
   return run;
+}
+
+async function persistWeiboCookieFromJob(platform, userId, cookie) {
+  if (platform !== 'weibo') return;
+  const value = String(cookie || '').trim();
+  if (!value || !value.includes('SUB=')) return;
+  try {
+    await saveSettingsPatch({
+      cookies: {
+        weibo: value,
+        per_user: { [`${platform}:${userId}`]: value },
+      },
+    });
+  } catch (e) {
+    console.error('保存微博 Cookie 失败:', e);
+  }
 }
 
 function mimeForAsset(filePath) {
@@ -263,6 +323,10 @@ function createWindow() {
 app.whenReady().then(() => {
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.social-archiver.app');
+  }
+  // Windows/Linux: drop Electron's default File/Edit/View menu bar.
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null);
   }
   protocol.handle('social-archiver', (request) => {
     try {
@@ -442,17 +506,24 @@ function readInstagramFetchOptions(outputDir, userId) {
   }
 }
 
+function clampConcurrent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 3;
+  return Math.min(5, Math.max(1, Math.round(n)));
+}
+
 function spawnBackendJob(job) {
   const settings = readSettings();
-  const backendInfo = resolveBackendPath();
+  const backendInfo = resolveBackendPath(job.platform);
   const cookieFile = writeCookieFile(job.cookie);
+  const concurrent = clampConcurrent(job.concurrent || settings.concurrent || 3);
   const args = [
     ...backendInfo.args,
     '--platform', job.platform,
     '--user-id', job.userId,
     '--cookie-file', cookieFile,
     '--output-dir', job.outputDir,
-    '--concurrent', String(job.concurrent || settings.concurrent || 3),
+    '--concurrent', String(concurrent),
     '--naming-template', job.namingTemplate || settings.naming_template || '{post_id}_{index}',
   ];
   if (job.startDate) args.push('--start-date', job.startDate);
@@ -560,6 +631,9 @@ function processQueue() {
       if (evt.type === 'done') {
         evt.userDir = path.join(job.outputDir, job.platform, job.userId);
         updateProfileLastUpdate(evt.userDir);
+        if (evt.cookie) {
+          persistWeiboCookieFromJob(job.platform, job.userId, evt.cookie);
+        }
         logUpdate(job.outputDir, {
           platform: job.platform,
           userId: job.userId,
@@ -707,9 +781,9 @@ ipcMain.handle('get-batch-status', async () => {
   };
 });
 
-function runBackendJsonLines(extraArgs, { cookie } = {}) {
+function runBackendJsonLines(extraArgs, { cookie, platform } = {}) {
   return new Promise((resolve, reject) => {
-    const backendInfo = resolveBackendPath();
+    const backendInfo = resolveBackendPath(platform);
     const cookieFile = cookie != null ? writeCookieFile(cookie) : '';
     const args = [...backendInfo.args, ...extraArgs];
     if (cookieFile) args.push('--cookie-file', cookieFile);
@@ -777,6 +851,9 @@ ipcMain.handle('start-download', async (event, { platform, userId, cookie, outpu
         if (parsed.type === 'done') {
           parsed.userDir = path.join(outputDir, platform, userId);
           updateProfileLastUpdate(parsed.userDir);
+          if (parsed.cookie) {
+            persistWeiboCookieFromJob(platform, userId, parsed.cookie);
+          }
           logUpdate(outputDir, {
             platform,
             userId,
@@ -900,7 +977,8 @@ ipcMain.handle('save-settings', async (event, settings) => {
     }
     return { success: true };
   } catch (e) {
-    return { success: false, error: e.message };
+    console.error('保存设置失败:', e);
+    return { success: false, error: e.message || String(e) };
   }
 });
 
@@ -1002,7 +1080,7 @@ ipcMain.handle('generate-posters', async (event, { outputDir, platform, userId }
 ipcMain.handle('check-cookie', async (event, { platform, cookie }) => {
   try {
     const args = ['--check-cookie', '--platform', platform];
-    const events = await runBackendJsonLines(args, { cookie });
+    const events = await runBackendJsonLines(args, { cookie, platform });
     const result = events.find((e) => e.type === 'cookie-check');
     if (!result) {
       const err = events.find((e) => e.type === 'error');
@@ -1049,7 +1127,7 @@ async function buildScheduledJobs(settings) {
       userId: user.name,
       cookie,
       outputDir,
-      concurrent: settings.concurrent || 3,
+      concurrent: clampConcurrent(settings.concurrent || 3),
       namingTemplate: settings.naming_template || '{post_id}_{index}',
       ...readTwitterFetchOptions(outputDir, user.name),
       ...readWeiboFetchOptions(outputDir, user.name),
@@ -1513,6 +1591,36 @@ async function runLoginCapture(opts) {
   }
 }
 
+async function validateWeiboLoginCookie(cookieStr) {
+  if (!cookieStr) return false
+  try {
+    const resp = await fetch('https://m.weibo.cn/api/config', {
+      headers: {
+        'User-Agent': (
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) '
+          + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 '
+          + 'Mobile/15E148 Safari/604.1'
+        ),
+        Cookie: cookieStr,
+        Referer: 'https://m.weibo.cn/',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    })
+    const data = await resp.json()
+    return Boolean(data?.data?.login)
+  } catch (_) {
+    return false
+  }
+}
+
+async function loginCookieReady(opts, cookieStr) {
+  if (!cookieStr) return false
+  if (opts.requiredName === 'SUB') {
+    return validateWeiboLoginCookie(cookieStr)
+  }
+  return true
+}
+
 async function collectCookies(ses, domains) {
   const buckets = await Promise.all(domains.map((domain) => ses.cookies.get({ domain })));
   const byName = new Map();
@@ -1630,6 +1738,7 @@ async function tryCookieLogin(opts) {
     if (opts.userAgent) {
       loginWindow.webContents.setUserAgent(opts.userAgent);
     }
+    await applySessionProxy(loginSession);
     loginWindow.show();
     try {
       await loginWindow.loadURL(opts.url);
@@ -1651,7 +1760,10 @@ async function tryCookieLogin(opts) {
         const byName = await collectCookies(loginSession, opts.domains);
         if (resolved) return;
         if (byName.get(opts.requiredName)) {
-          resolveWith(cookieMapToString(byName), null);
+          const cookieStr = cookieMapToString(byName);
+          if (await loginCookieReady(opts, cookieStr)) {
+            resolveWith(cookieStr, null);
+          }
         }
       } catch (e) {
         debugLog('Cookie check error: ' + e.message);
@@ -1664,8 +1776,8 @@ async function tryCookieLogin(opts) {
   }
 }
 
-function resolveBackendPath() {
-  const env = { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' };
+function resolveBackendPath(platform) {
+  const env = buildBackendEnv(platform);
   if (app.isPackaged) {
     delete env.PYTHONHOME;
     delete env.PYTHONPATH;

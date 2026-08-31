@@ -1,10 +1,13 @@
 <template>
-  <div class="sa-sheet">
-    <div class="sa-page">
+  <div class="sa-workspace settings-workspace">
+    <div class="sa-workspace-main">
+      <div class="sa-page">
       <h2>设置</h2>
       <p class="lede">默认目录和下载参数会记住。缓存时仍可临时换目录。</p>
 
-      <label class="sa-field">
+      <section class="sa-section">
+        <h3 class="sa-section-title">基本</h3>
+        <label class="sa-field">
         <span>默认下载目录</span>
         <div class="sa-row">
           <input class="sa-input" :value="settings.output_dir" readonly placeholder="选择下载目录" />
@@ -18,9 +21,12 @@
           class="sa-input"
           type="number"
           min="1"
-          max="10"
+          max="5"
           v-model.number="settings.concurrent"
         />
+        <p class="sa-help">
+          同时下载媒体的线程数（1～5，上限锁死）。微博实际最多 2 路，翻页另有间隔；X / Instagram 通过 gallery-dl 拉取，过高容易触发限流。日常建议 2～3。
+        </p>
       </label>
 
       <label class="sa-field">
@@ -36,15 +42,32 @@
       <button class="sa-btn sa-btn-primary" type="button" :disabled="saving" @click="saveSettings">
         {{ saving ? '保存中…' : '保存设置' }}
       </button>
+      </section>
+
+      <section class="sa-section">
+      <h3 class="sa-section-title">网络代理</h3>
+      <p class="sa-section-lede">
+        访问 X / Instagram 需要代理时填写。留空则依赖系统代理（如 Clash 开启「系统代理」）。
+      </p>
+      <label class="sa-field">
+        <span>代理地址</span>
+        <input
+          class="sa-input"
+          v-model="settings.proxy_url"
+          placeholder="http://127.0.0.1:7890"
+          autocomplete="off"
+        />
+        <p class="sa-help">支持 <code>http://</code> 或 <code>socks5://</code>。仅用于 X / Instagram 缓存与应用内登录；微博始终直连。留空则依赖系统代理。</p>
+      </label>
 
       <p v-if="portableInfo?.portable" class="sa-help portable-hint">
         便携模式已启用。配置保存在：{{ portableInfo.settingsPath }}
       </p>
+      </section>
 
-      <hr class="sa-rule" />
-
-      <h3 class="section-heading">定时更新</h3>
-      <p class="lede section-lede">应用开着时，到点自动批量更新设为「每日 / 每周」的用户。</p>
+      <section class="sa-section">
+      <h3 class="sa-section-title">定时更新</h3>
+      <p class="sa-section-lede">应用开着时，到点自动批量更新设为「每日 / 每周」的用户。</p>
       <label class="sa-field sa-check">
         <input type="checkbox" v-model="schedulerEnabled" />
         <span>启用定时更新</span>
@@ -54,11 +77,25 @@
         <input class="sa-input" type="time" v-model="schedulerRunAt" />
       </label>
       <p class="sa-help">在浏览页用户管理里为每个账号设置「每日 / 每周 / 手动」。</p>
+      </section>
 
-      <hr class="sa-rule" />
+      <section class="sa-section">
+      <h3 class="sa-section-title">通知</h3>
+      <label class="sa-field sa-check">
+        <input type="checkbox" v-model="notificationsEnabled" />
+        <span>缓存完成时显示系统通知（批量完成 / 单用户完成）</span>
+      </label>
+      <p class="sa-help">更新记录写入存档目录 <code>update-log.jsonl</code>。</p>
+      </section>
+      </div>
+    </div>
 
-      <h3 class="section-heading">视频转码</h3>
-      <p class="lede section-lede">
+    <aside class="sa-workspace-side">
+      <div class="sa-page">
+      <h2 class="side-heading">维护与登录</h2>
+      <section class="sa-section">
+      <h3 class="sa-section-title">视频转码</h3>
+      <p class="sa-section-lede">
         微博实况等 HEVC 视频在应用窗口内无法播放。安装 ffmpeg 后可一键转为 H.264，原文件保留，生成 <code>{原名}_h264.mp4</code>。
       </p>
       <p class="sa-help ffmpeg-status" :class="ffmpegProbe?.available ? 'ok' : 'warn'">
@@ -100,11 +137,11 @@
       <p v-if="posterSummary" class="verify-summary" :class="posterSummary.ok ? 'ok' : 'warn'">
         {{ posterSummary.text }}
       </p>
+      </section>
 
-      <hr class="sa-rule" />
-
-      <h3 class="section-heading">存档校验</h3>
-      <p class="lede section-lede">检查帖子 JSON 引用的媒体是否缺失或损坏。</p>
+      <section class="sa-section">
+      <h3 class="sa-section-title">存档校验</h3>
+      <p class="sa-section-lede">检查帖子 JSON 引用的媒体是否缺失或损坏。</p>
       <div class="sa-row">
         <button class="sa-btn sa-btn-ghost" type="button" :disabled="verifying" @click="runVerify">
           {{ verifying ? '校验中…' : '校验全部存档' }}
@@ -136,11 +173,11 @@
         </li>
         <li v-if="verifyIssues.length > 20">…还有 {{ verifyIssues.length - 20 }} 项</li>
       </ul>
+      </section>
 
-      <hr class="sa-rule" />
-
-      <h3 class="section-heading">微博实况修复</h3>
-      <p class="lede section-lede">检测并删除损坏的实况 mp4（过小或无 ftyp），之后到浏览页点「更新」可重新拉取。</p>
+      <section class="sa-section">
+      <h3 class="sa-section-title">微博实况修复</h3>
+      <p class="sa-section-lede">检测并删除损坏的实况 mp4（过小或无 ftyp），之后到浏览页点「更新」可重新拉取。</p>
       <div class="sa-row">
         <button class="sa-btn sa-btn-ghost" type="button" :disabled="repairing" @click="runRepairWeibo">
           {{ repairing ? '修复中…' : '修复微博损坏实况' }}
@@ -149,27 +186,18 @@
       <p v-if="repairSummary" class="verify-summary" :class="repairSummary.ok ? 'ok' : 'warn'">
         {{ repairSummary.text }}
       </p>
+      </section>
 
-      <hr class="sa-rule" />
-
-      <h3 class="section-heading">通知</h3>
-      <label class="sa-field sa-check">
-        <input type="checkbox" v-model="notificationsEnabled" />
-        <span>缓存完成时显示系统通知（批量完成 / 单用户完成）</span>
-      </label>
-      <p class="sa-help">更新记录写入存档目录 <code>update-log.jsonl</code>。</p>
-
-      <hr class="sa-rule" />
-
-      <h3 class="cookie-heading">登录 Cookie</h3>
-      <p class="lede cookie-lede">只留本机。过期后点重新登录，不必回到缓存页。</p>
+      <section class="sa-section">
+      <h3 class="sa-section-title">登录 Cookie</h3>
+      <p class="sa-section-lede">只留本机。过期后点重新登录，不必回到缓存页。</p>
       <div class="sa-row cookie-check-row">
         <button class="sa-btn sa-btn-ghost" type="button" :disabled="checkingCookies" @click="checkAllCookies">
           {{ checkingCookies ? '检测中…' : '检测全部 Cookie' }}
         </button>
       </div>
 
-      <div v-for="row in platformRows" :key="row.key" class="cookie-row">
+      <div v-for="row in platformRows" :key="row.key" class="cookie-card">
         <div class="cookie-meta">
           <span class="cookie-name">{{ row.label }}</span>
           <span class="cookie-mask" :class="cookieStatusClass(row.platform)">
@@ -194,7 +222,7 @@
 
       <div v-if="userRows.length" class="cookie-users">
         <p class="sa-help">按用户保存的 Cookie</p>
-        <div v-for="row in userRows" :key="row.key" class="cookie-row">
+        <div v-for="row in userRows" :key="row.key" class="cookie-card">
           <div class="cookie-meta">
             <span class="cookie-name">{{ row.label }}</span>
             <span class="cookie-mask ok">{{ maskCookie(row.value) }}</span>
@@ -206,7 +234,9 @@
           </div>
         </div>
       </div>
-    </div>
+      </section>
+      </div>
+    </aside>
   </div>
 </template>
 
@@ -218,16 +248,26 @@ import {
   clearPlatformCookie,
   clearUserCookie,
   maskCookie,
+  perUserCookiesForPlatform,
   savePlatformCookie,
 } from '../utils/session.js'
 import type { CookieCheckResult, FfmpegProbeResult, PortableInfo, RepairResult, Settings, VerifyIssue } from '../electron-api.d.ts'
 import { requestOpenPost } from '../utils/navBus.ts'
 import { cookieForUser, hasUsableCookie } from '../utils/session.js'
 
+const MAX_CONCURRENT = 5
+
+function clampConcurrent(value: unknown) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 3
+  return Math.min(MAX_CONCURRENT, Math.max(1, Math.round(n)))
+}
+
 const settings = ref<Settings>({
   output_dir: '',
   concurrent: 3,
   naming_template: '{post_id}_{index}',
+  proxy_url: '',
   scheduler: { enabled: false, run_at: '03:00' },
   ffmpeg: { enabled: false },
   notifications: { enabled: true },
@@ -300,6 +340,7 @@ async function loadSettings() {
       settings.value = {
         ...settings.value,
         ...s,
+        concurrent: clampConcurrent(s.concurrent ?? settings.value.concurrent),
         scheduler: {
           enabled: false,
           run_at: '03:00',
@@ -334,22 +375,40 @@ async function selectDir() {
   }
 }
 
+function settingsSavePatch() {
+  return {
+    output_dir: settings.value.output_dir,
+    concurrent: clampConcurrent(settings.value.concurrent),
+    naming_template: settings.value.naming_template,
+    proxy_url: settings.value.proxy_url?.trim() || '',
+    scheduler: {
+      enabled: Boolean(settings.value.scheduler?.enabled),
+      run_at: settings.value.scheduler?.run_at || '03:00',
+    },
+    ffmpeg: {
+      enabled: Boolean(settings.value.ffmpeg?.enabled),
+    },
+    notifications: {
+      enabled: settings.value.notifications?.enabled !== false,
+    },
+  }
+}
+
 async function saveSettings() {
   saving.value = true
   try {
     if (window.electronAPI) {
-      await window.electronAPI.saveSettings({
-        output_dir: settings.value.output_dir,
-        concurrent: settings.value.concurrent,
-        naming_template: settings.value.naming_template,
-        scheduler: settings.value.scheduler,
-        ffmpeg: settings.value.ffmpeg,
-        notifications: settings.value.notifications,
-      })
+      const res = await window.electronAPI.saveSettings(settingsSavePatch()) as { success?: boolean; error?: string }
+      if (res?.success === false) {
+        toast.error(res.error || '保存设置失败')
+        return
+      }
       toast.success('设置已保存')
     }
   } catch (e) {
-    toast.error('保存设置失败')
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('保存设置失败:', e)
+    toast.error(msg ? `保存设置失败：${msg}` : '保存设置失败')
   } finally {
     saving.value = false
   }
@@ -368,7 +427,13 @@ async function reloginPlatform(platform: string) {
       return
     }
     await savePlatformCookie(platform, res.cookie)
+    const check = await window.electronAPI.checkCookie({ platform, cookie: res.cookie })
+    cookieStatus.value = { ...cookieStatus.value, [platform]: check }
     await loadSettings()
+    if (!check.valid) {
+      toast.error(check.message || 'Cookie 仍未处于登录状态')
+      return
+    }
     toast.success('Cookie 已更新')
   } catch (e) {
     toast.error('登录失败')
@@ -395,11 +460,39 @@ function cookieStatusClass(platform: string) {
   return status.valid ? 'ok' : 'warn'
 }
 
-function cookieStatusText(row: { platform: string; value?: string }) {
+function cookieStatusText(row: { platform: string; value?: string; sourceUserId?: string }) {
   const status = cookieStatus.value[row.platform]
   if (status) return status.message
-  if (row.value) return maskCookie(row.value)
+  if (row.value) {
+    const masked = maskCookie(row.value)
+    return row.sourceUserId ? `${masked}（来自 @${row.sourceUserId}）` : masked
+  }
   return '未保存'
+}
+
+async function checkPlatformCookie(platform: string, platformValue: string) {
+  if (!window.electronAPI) {
+    return { valid: false, message: '不可用' }
+  }
+  const candidates: string[] = []
+  if (platformValue) candidates.push(platformValue)
+  for (const cookie of perUserCookiesForPlatform(settings.value, platform)) {
+    if (cookie && !candidates.includes(cookie)) candidates.push(cookie)
+  }
+  if (!candidates.length) {
+    return { valid: false, message: '未保存' }
+  }
+  for (const cookie of candidates) {
+    const result = await window.electronAPI.checkCookie({ platform, cookie })
+    if (result.valid) {
+      if (cookie !== platformValue) {
+        await savePlatformCookie(platform, cookie)
+        await loadSettings()
+      }
+      return result
+    }
+  }
+  return await window.electronAPI.checkCookie({ platform, cookie: candidates[0] })
 }
 
 async function checkAllCookies() {
@@ -408,14 +501,7 @@ async function checkAllCookies() {
   const next: Record<string, CookieCheckResult> = {}
   try {
     for (const row of platformRows.value) {
-      if (!row.value) {
-        next[row.platform] = { valid: false, message: '未保存' }
-        continue
-      }
-      next[row.platform] = await window.electronAPI.checkCookie({
-        platform: row.platform,
-        cookie: row.value,
-      })
+      next[row.platform] = await checkPlatformCookie(row.platform, row.value || '')
     }
     cookieStatus.value = next
     const bad = Object.values(next).filter((item) => !item.valid).length
@@ -572,7 +658,7 @@ async function updateIssueUser(issue: VerifyIssue) {
     userId: issue.user_id,
     cookie,
     outputDir: settings.value.output_dir,
-    concurrent: settings.value.concurrent,
+    concurrent: clampConcurrent(settings.value.concurrent),
     namingTemplate: settings.value.naming_template,
   })
   if (res.success) toast.info(`已开始更新 ${issue.platform}/${issue.user_id}`)
@@ -636,17 +722,6 @@ async function rebuildIndex() {
 </script>
 
 <style scoped>
-.cookie-heading,
-.section-heading {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.section-lede {
-  margin-bottom: 12px;
-}
-
 .cookie-check-row {
   margin-bottom: 8px;
 }
@@ -723,17 +798,25 @@ async function rebuildIndex() {
   word-break: break-all;
 }
 
-.cookie-lede {
-  margin-bottom: 12px;
-}
-
-.cookie-row {
+.cookie-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--sa-hairline);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border-radius: var(--sa-radius-control);
+  border: 1px solid var(--sa-edge);
+  background: var(--sa-field);
+  transition: border-color var(--sa-transition), background var(--sa-transition);
+}
+
+.cookie-card:hover {
+  border-color: color-mix(in srgb, var(--sa-edge) 60%, var(--sa-muted));
+}
+
+.cookie-card:last-child {
+  margin-bottom: 0;
 }
 
 .cookie-meta {
@@ -769,6 +852,8 @@ async function rebuildIndex() {
 }
 
 .cookie-users {
-  margin-top: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--sa-hairline);
 }
 </style>

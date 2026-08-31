@@ -111,6 +111,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useToast } from '../composables/useToast'
+import { savePlatformCookie } from '../utils/session.js'
 
 const props = defineProps<{
   modelValue: string
@@ -203,8 +204,14 @@ async function handleWeiboLogin() {
     if (window.electronAPI) {
       const res = await window.electronAPI.weiboLogin()
       if (res.success && res.cookie) {
+        const check = await window.electronAPI.checkCookie({ platform: 'weibo', cookie: res.cookie })
+        if (!check.valid) {
+          toast.error(check.message || '微博 Cookie 仍未处于登录状态')
+          return
+        }
         emit('update:modelValue', res.cookie)
-        toast.success('微博登录成功，Cookie 已自动填入')
+        await savePlatformCookie('weibo', res.cookie)
+        toast.success('微博登录成功，Cookie 已保存')
       } else {
         toast.error(res.error || '登录失败')
       }
@@ -223,6 +230,7 @@ async function handleTwitterLogin() {
       const res = await window.electronAPI.twitterLogin()
       if (res.success && res.cookie) {
         emit('update:modelValue', res.cookie)
+        await savePlatformCookie('twitter', res.cookie)
         toast.success('X 登录成功，auth_token 和 ct0 已分别填入')
       } else {
         toast.error(res.error || '登录失败')
@@ -242,6 +250,7 @@ async function handleInstagramLogin() {
       const res = await window.electronAPI.instagramLogin()
       if (res.success && res.cookie) {
         emit('update:modelValue', res.cookie)
+        await savePlatformCookie('instagram', res.cookie)
         toast.success('Instagram 登录成功，sessionid 已自动填入')
       } else {
         toast.error(res.error || '登录失败')

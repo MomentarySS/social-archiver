@@ -104,6 +104,48 @@
       </div>
     </div>
 
+    <!-- Batch bar (above list so actions stay visible) -->
+    <div v-if="users.length" class="um-footer">
+      <label class="um-select-all">
+        <input type="checkbox" :checked="allChecked" @change="toggleAll" />
+        <span>全选</span>
+      </label>
+      <div class="um-footer-actions">
+        <span class="um-selected-count">{{ checkedUsers.size }} 个已选</span>
+        <button
+          class="ghost-btn"
+          type="button"
+          :disabled="checkedUsers.size === 0 || batchRunning"
+          @click="emit('batch-delete', [...checkedUsers])"
+        >批量删除</button>
+        <button
+          class="primary-btn"
+          type="button"
+          :disabled="checkedUsers.size === 0 || batchRunning"
+          @click="startBatchUpdate"
+        >批量更新</button>
+      </div>
+    </div>
+
+    <!-- Batch Progress Bar -->
+    <div v-if="batchRunning" class="um-batch-progress">
+      <div class="batch-status">
+        <span v-if="currentBatchUser">
+          正在缓存：{{ currentBatchUser }}
+        </span>
+        <span v-else>批量任务进行中…</span>
+        <span class="batch-count">
+          {{ completedCount }} / {{ totalBatchCount }} 完成
+        </span>
+      </div>
+      <div class="batch-bar">
+        <div class="batch-bar-fill" :style="{ width: batchPercent + '%' }"></div>
+      </div>
+      <div class="um-form-row um-form-actions">
+        <button class="ghost-btn" type="button" @click="emit('stop-batch')">停止</button>
+      </div>
+    </div>
+
     <!-- User List -->
     <div class="um-list">
       <div v-if="!users.length" class="um-empty">
@@ -176,48 +218,6 @@
           </select>
           <span class="um-time">{{ formatLastUpdate(user.lastUpdate) }}</span>
         </div>
-      </div>
-    </div>
-
-    <!-- Batch Footer -->
-    <div v-if="users.length" class="um-footer">
-      <label class="um-select-all">
-        <input type="checkbox" :checked="allChecked" @change="toggleAll" />
-        <span>全选</span>
-      </label>
-      <div class="um-footer-actions">
-        <span class="um-selected-count">{{ checkedUsers.size }} 个已选</span>
-        <button
-          class="ghost-btn"
-          type="button"
-          :disabled="checkedUsers.size === 0 || batchRunning"
-          @click="emit('batch-delete', [...checkedUsers])"
-        >批量删除</button>
-        <button
-          class="primary-btn"
-          type="button"
-          :disabled="checkedUsers.size === 0 || batchRunning"
-          @click="startBatchUpdate"
-        >批量更新</button>
-      </div>
-    </div>
-
-    <!-- Batch Progress Bar -->
-    <div v-if="batchRunning" class="um-batch-progress">
-      <div class="batch-status">
-        <span v-if="currentBatchUser">
-          正在缓存：{{ currentBatchUser }}
-        </span>
-        <span v-else>批量任务进行中…</span>
-        <span class="batch-count">
-          {{ completedCount }} / {{ totalBatchCount }} 完成
-        </span>
-      </div>
-      <div class="batch-bar">
-        <div class="batch-bar-fill" :style="{ width: batchPercent + '%' }"></div>
-      </div>
-      <div class="um-form-row um-form-actions">
-        <button class="ghost-btn" type="button" @click="emit('stop-batch')">停止</button>
       </div>
     </div>
 
@@ -428,7 +428,11 @@ watch(() => props.users, () => {
 
 <style scoped>
 .user-manager {
-  background: var(--sa-surface);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--sa-bg);
   border-bottom: 1px solid var(--sa-edge);
 }
 
@@ -437,12 +441,13 @@ watch(() => props.users, () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px 6px;
+  padding: 12px 16px 8px;
 }
 
 .um-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--sa-ink);
 }
 
@@ -453,9 +458,11 @@ watch(() => props.users, () => {
 
 /* Add form */
 .um-add-form {
-  padding: 8px 16px 12px;
+  padding: 10px 16px 14px;
   border-bottom: 1px solid var(--sa-edge);
-  background: var(--sa-bg);
+  background: var(--sa-panel);
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
 }
 
 .um-form-row {
@@ -532,7 +539,8 @@ watch(() => props.users, () => {
 
 /* User list */
 .um-list {
-  max-height: 320px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -554,8 +562,9 @@ watch(() => props.users, () => {
   row-gap: 6px;
   align-items: center;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--sa-edge);
+  border-bottom: 1px solid var(--sa-hairline);
   cursor: pointer;
+  transition: background var(--sa-transition);
 }
 
 .um-item:last-child {
@@ -563,11 +572,11 @@ watch(() => props.users, () => {
 }
 
 .um-item.is-selected {
-  background: color-mix(in srgb, var(--sa-accent) 8%, transparent);
+  background: color-mix(in srgb, var(--sa-accent) 10%, transparent);
 }
 
 .um-item:hover {
-  background: color-mix(in srgb, var(--sa-ink) 5%, transparent);
+  background: var(--sa-hover);
 }
 
 .um-check {
@@ -675,13 +684,13 @@ watch(() => props.users, () => {
   cursor: not-allowed;
 }
 
-/* Footer */
+/* Batch bar */
 .um-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 16px;
-  border-top: 1px solid var(--sa-edge);
+  border-bottom: 1px solid var(--sa-edge);
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -708,8 +717,10 @@ watch(() => props.users, () => {
 
 /* Batch progress */
 .um-batch-progress {
+  flex-shrink: 0;
   padding: 8px 16px 10px;
-  border-top: 1px solid var(--sa-edge);
+  border-bottom: 1px solid var(--sa-edge);
+  background: color-mix(in srgb, var(--sa-accent) 6%, var(--sa-surface));
 }
 
 .batch-status {
