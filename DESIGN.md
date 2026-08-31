@@ -230,6 +230,10 @@ Browse is full-bleed under a thin tab strip. The feed is a 600px column on paper
 
 **Archive overview (Browse hub):** Default Browse right pane before any account is opened. Same 600px column, no avatars or media thumbnails. Header title + muted lede, summary strip on `--sa-field`, clickable user rows with platform pill + name + text-only stats. User mode shows a ghost **返回概览** pill in the sticky bar.
 
+**User timeline sidebar (v1.2):** When viewing one account, a compact month calendar lists days with posts (`_posts/{date}/`). Clicking a day filters the timeline to that date; works with the top-bar date range picker.
+
+**Hashtag filter (v1.2):** Top bar shows extracted `#话题` as pill toggles; one active tag filters the visible posts. Snippet highlighting from search remains separate.
+
 **Chrome polish (v1.1.1):** Cache and Settings use inset `sa-section` panels on `--sa-panel`. Controls share `--sa-hover`, `--sa-transition`, 12px control radius, and accent focus rings. Browse bar uses shared `sa-pill-btn` tokens. Post timeline layout unchanged.
 
 ## Elevation & Depth

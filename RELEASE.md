@@ -41,8 +41,26 @@ npm.cmd run version:print
 
 - [ ] 解压 zip，运行 `Social Archiver.exe`
 - [ ] 缓存：至少测一个平台（建议微博 + X 各一次）
-- [ ] 浏览：存档概览 → 进入用户 → 返回概览
-- [ ] 设置：保存、Cookie 检测或校验入口可打开
+- [ ] 浏览：存档概览 → 进入用户 → 月历 / 话题筛选
+- [ ] 设置：检查更新、Cookie 检测或校验入口可打开
+
+## 检查更新（路线 2）
+
+应用内：**设置 → 关于与更新**。可填 `update_manifest_url` 指向静态 JSON（示例 [`scripts/update-manifest.example.json`](scripts/update-manifest.example.json)）：
+
+```json
+{
+  "version": "1.2.0",
+  "notesUrl": "https://你的站点/CHANGELOG.html",
+  "zipUrl": "https://你的站点/SocialArchiver-1.2.0-win.zip"
+}
+```
+
+发 zip 后把 manifest 里的 `version` / `zipUrl` 一并更新即可；无需 GitHub Releases。
+
+## 代码签名（可选）
+
+有 Authenticode 证书时见 [SIGNING.md](SIGNING.md)。无证书可继续发未签名 zip。
 
 ## 可选
 

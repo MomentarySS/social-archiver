@@ -1,0 +1,10 @@
+{
+  "id": "1001",
+  "platform": "weibo",
+  "text": "第一条测试帖",
+  "date": "2024-06-15",
+  "created_at": "2024-06-15T10:00:00Z",
+  "url": "https://weibo.com/detail/1001",
+  "user_name": "测试用户",
+  "screen_name": "fixture_user"
+}

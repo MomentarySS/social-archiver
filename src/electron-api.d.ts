@@ -63,6 +63,26 @@ export interface ElectronAPI {
   probeFfmpeg: () => Promise<FfmpegProbeResult>
   transcodeArchives: (params: { outputDir: string; platform?: string; userId?: string }) => Promise<TranscodeResult>
   generatePosters: (params: { outputDir: string; platform?: string; userId?: string }) => Promise<PosterResult>
+  getAppInfo: () => Promise<AppInfo>
+  checkForUpdates: () => Promise<UpdateCheckResult>
+  openUpdateNotes: (url: string) => Promise<{ success: boolean; error?: string }>
+}
+
+export interface AppInfo {
+  name: string
+  version: string
+}
+
+export type UpdateCheckStatus = 'no_url' | 'up_to_date' | 'update_available' | 'error'
+
+export interface UpdateCheckResult {
+  status: UpdateCheckStatus
+  currentVersion: string
+  latestVersion: string
+  message?: string
+  notesUrl?: string
+  downloadUrl?: string
+  releaseNotes?: string
 }
 
 export interface Settings {
@@ -79,6 +99,14 @@ export interface Settings {
   user_last_scheduled?: Record<string, string>
   ffmpeg?: FfmpegSettings
   notifications?: NotificationSettings
+  batch_retry?: BatchRetrySettings
+  update_manifest_url?: string
+}
+
+export interface BatchRetrySettings {
+  enabled?: boolean
+  max_attempts?: number
+  base_delay_ms?: number
 }
 
 export interface FfmpegSettings {
@@ -193,7 +221,7 @@ export interface BatchStatus {
 }
 
 export interface BatchEvent {
-  type: 'user-start' | 'user-progress' | 'user-done' | 'user-error' | 'batch-done' | 'batch-stopped' | 'done' | 'error' | 'progress' | 'status'
+  type: 'user-start' | 'user-progress' | 'user-done' | 'user-error' | 'user-retry-scheduled' | 'batch-done' | 'batch-stopped' | 'done' | 'error' | 'progress' | 'status'
   userId?: string
   platform?: string
   msg?: string
@@ -207,6 +235,9 @@ export interface BatchEvent {
   output_dir?: string
   userDir?: string
   queued?: number
+  attempt?: number
+  maxAttempts?: number
+  delayMs?: number
 }
 
 export interface UserProfile {

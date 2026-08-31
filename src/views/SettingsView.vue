@@ -87,6 +87,55 @@
       </label>
       <p class="sa-help">更新记录写入存档目录 <code>update-log.jsonl</code>。</p>
       </section>
+
+      <section class="sa-section">
+      <h3 class="sa-section-title">批量缓存</h3>
+      <p class="sa-section-lede">批量更新时，单用户失败会自动按指数退避重试。</p>
+      <label class="sa-field sa-check">
+        <input type="checkbox" v-model="batchRetryEnabled" />
+        <span>启用失败自动重试</span>
+      </label>
+      <label class="sa-field">
+        <span>最多重试次数</span>
+        <input class="sa-input" type="number" min="1" max="5" v-model.number="batchRetryMaxAttempts" />
+      </label>
+      <p class="sa-help">间隔约 5s、10s、20s…（上限 5 次）。手动停止批量会取消待重试任务。</p>
+      </section>
+
+      <section class="sa-section">
+      <h3 class="sa-section-title">关于与更新</h3>
+      <p class="sa-help">当前版本：<strong>{{ appInfo?.version || '—' }}</strong></p>
+      <label class="sa-field">
+        <span>更新清单 URL（可选）</span>
+        <input
+          class="sa-input"
+          v-model="settings.update_manifest_url"
+          placeholder="https://example.com/social-archiver/update.json"
+          autocomplete="off"
+        />
+        <p class="sa-help">JSON 含 <code>version</code>、<code>notesUrl</code>、<code>zipUrl</code>。留空则仅显示当前版本。路线 2 本地发 zip 时可自建静态页托管。</p>
+      </label>
+      <div class="sa-row">
+        <button class="sa-btn sa-btn-ghost" type="button" :disabled="checkingUpdates" @click="runCheckUpdates">
+          {{ checkingUpdates ? '检查中…' : '检查更新' }}
+        </button>
+      </div>
+      <p v-if="updateMessage" class="sa-help" :class="updateMessageKind">{{ updateMessage }}</p>
+      <div v-if="updateInfo?.notesUrl || updateInfo?.downloadUrl" class="sa-row">
+        <button
+          v-if="updateInfo?.notesUrl"
+          class="sa-btn sa-btn-ghost"
+          type="button"
+          @click="openUpdateLink(updateInfo.notesUrl)"
+        >查看更新说明</button>
+        <button
+          v-if="updateInfo?.downloadUrl"
+          class="sa-btn sa-btn-ghost"
+          type="button"
+          @click="openUpdateLink(updateInfo.downloadUrl)"
+        >打开下载链接</button>
+      </div>
+      </section>
       </div>
     </div>
 
@@ -251,7 +300,16 @@ import {
   perUserCookiesForPlatform,
   savePlatformCookie,
 } from '../utils/session.js'
-import type { CookieCheckResult, FfmpegProbeResult, PortableInfo, RepairResult, Settings, VerifyIssue } from '../electron-api.d.ts'
+import type {
+  AppInfo,
+  CookieCheckResult,
+  FfmpegProbeResult,
+  PortableInfo,
+  RepairResult,
+  Settings,
+  UpdateCheckResult,
+  VerifyIssue,
+} from '../electron-api.d.ts'
 import { requestOpenPost } from '../utils/navBus.ts'
 import { cookieForUser, hasUsableCookie } from '../utils/session.js'
 
@@ -271,8 +329,15 @@ const settings = ref<Settings>({
   scheduler: { enabled: false, run_at: '03:00' },
   ffmpeg: { enabled: false },
   notifications: { enabled: true },
+  batch_retry: { enabled: true, max_attempts: 3 },
+  update_manifest_url: '',
 })
 const saving = ref(false)
+const checkingUpdates = ref(false)
+const appInfo = ref<AppInfo | null>(null)
+const updateInfo = ref<UpdateCheckResult | null>(null)
+const updateMessage = ref('')
+const updateMessageKind = ref<'ok' | 'warn'>('ok')
 const loggingKey = ref('')
 const verifying = ref(false)
 const rebuildingIndex = ref(false)
@@ -317,6 +382,21 @@ const notificationsEnabled = computed({
     settings.value.notifications = { ...(settings.value.notifications || {}), enabled: value }
   },
 })
+const batchRetryEnabled = computed({
+  get: () => settings.value.batch_retry?.enabled !== false,
+  set: (value: boolean) => {
+    settings.value.batch_retry = { ...(settings.value.batch_retry || {}), enabled: value }
+  },
+})
+const batchRetryMaxAttempts = computed({
+  get: () => settings.value.batch_retry?.max_attempts ?? 3,
+  set: (value: number) => {
+    settings.value.batch_retry = {
+      ...(settings.value.batch_retry || {}),
+      max_attempts: Math.min(5, Math.max(1, Number(value) || 3)),
+    }
+  },
+})
 const ffmpegStatusText = computed(() => {
   if (!ffmpegProbe.value) return '尚未检测 ffmpeg'
   if (ffmpegProbe.value.available) {
@@ -329,6 +409,7 @@ onMounted(async () => {
   await loadSettings()
   if (window.electronAPI) {
     portableInfo.value = await window.electronAPI.getPortableInfo()
+    appInfo.value = await window.electronAPI.getAppInfo()
     await refreshFfmpegProbe()
   }
 })
@@ -354,6 +435,12 @@ async function loadSettings() {
           enabled: true,
           ...(s.notifications || {}),
         },
+        batch_retry: {
+          enabled: true,
+          max_attempts: 3,
+          ...(s.batch_retry || {}),
+        },
+        update_manifest_url: s.update_manifest_url || '',
       }
     }
   } catch (e) {
@@ -391,7 +478,50 @@ function settingsSavePatch() {
     notifications: {
       enabled: settings.value.notifications?.enabled !== false,
     },
+    batch_retry: {
+      enabled: settings.value.batch_retry?.enabled !== false,
+      max_attempts: Math.min(5, Math.max(1, Number(settings.value.batch_retry?.max_attempts) || 3)),
+    },
+    update_manifest_url: settings.value.update_manifest_url?.trim() || '',
   }
+}
+
+async function runCheckUpdates() {
+  if (!window.electronAPI) return
+  checkingUpdates.value = true
+  updateInfo.value = null
+  try {
+    const saveRes = await window.electronAPI.saveSettings(settingsSavePatch()) as { success?: boolean; error?: string }
+    if (saveRes?.success === false) {
+      toast.error(saveRes.error || '保存设置失败')
+      return
+    }
+    const result = await window.electronAPI.checkForUpdates()
+    updateInfo.value = result
+    updateMessage.value = result.message || ''
+    if (result.status === 'update_available') {
+      updateMessageKind.value = 'warn'
+      toast.info(result.message || '发现新版本')
+    } else if (result.status === 'error') {
+      updateMessageKind.value = 'warn'
+      toast.error(result.message || '检查更新失败')
+    } else {
+      updateMessageKind.value = 'ok'
+      toast.success(result.message || '已是最新')
+    }
+  } catch (e) {
+    updateMessageKind.value = 'warn'
+    updateMessage.value = e instanceof Error ? e.message : '检查更新失败'
+    toast.error(updateMessage.value)
+  } finally {
+    checkingUpdates.value = false
+  }
+}
+
+async function openUpdateLink(url?: string) {
+  if (!window.electronAPI || !url) return
+  const res = await window.electronAPI.openUpdateNotes(url)
+  if (res?.success === false) toast.error(res.error || '无法打开链接')
 }
 
 async function saveSettings() {
@@ -736,6 +866,14 @@ async function rebuildIndex() {
 }
 
 .verify-summary.warn {
+  color: var(--sa-danger);
+}
+
+.sa-help.ok {
+  color: var(--sa-ok);
+}
+
+.sa-help.warn {
   color: var(--sa-danger);
 }
 

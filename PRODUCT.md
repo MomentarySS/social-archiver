@@ -34,7 +34,7 @@ Confirmed now:
 - Incremental writes into the existing user folder; media that already exists is skipped; Weibo update stops after a short streak of complete cached originals; Instagram and X use gallery-dl download archives so large accounts do not re-walk the whole timeline.
 - Settings lists saved platform and per-user cookies (masked), with re-login and clear. Browse-sidebar Update opens the in-app login window when a cookie is missing, same as the timeline Update button.
 - In-app browse uses a unified light/dark reading theme (default light) across cache, browse, and settings; post layout still follows the source platform. Offline HTML uses the same theme tokens, exports with the current theme, and supports toggling in the browser with the same `sa-browse-theme` preference key.
-- Browse tab includes a multi-user manager: list archived accounts, per-user cookies, batch update/delete, a serial batch download queue, and a stop control while the queue is running. Cache and browse both write `lastUpdate` on a successful run. Opening Browse lands on a text-only **archive overview** (account/post/media counts, no thumbnails); posts load only after the user picks an account. Switching away from Browse and back resets to the overview; deep links from search or settings still open the target post directly.
+- Browse tab includes a multi-user manager: list archived accounts, per-user cookies, batch update/delete, a serial batch download queue, and a stop control while the queue is running. Failed batch jobs can retry with exponential backoff (configurable in Settings, v1.2). Cache and browse both write `lastUpdate` on a successful run. Opening Browse lands on a text-only **archive overview** (account/post/media counts, no thumbnails); posts load only after the user picks an account. In user timeline mode, a sidebar month calendar jumps to days with posts; the top bar can filter by `#hashtag` extracted from post text. Switching away from Browse and back resets to the overview; deep links from search or settings still open the target post directly.
 - Global shortcuts `Ctrl+1/2/3` switch Cache / Browse / Settings tabs while the window is focused (they are not registered as OS-wide hotkeys).
 - Cookie-gated access; X guest tokens are not sufficient.
 - Weibo live photos are one grid cell (still + hover motion), not a still plus a separate video cell.
@@ -43,6 +43,7 @@ Confirmed now:
 - Packaged Windows zip ships a frozen backend (Weibo fetcher + gallery-dl for X and Instagram); no separate Python install for end users. At runtime, a system-installed gallery-dl is preferred when present so users can upgrade without rebuilding the app.
 - Optional X bookmarks and likes (v1.0): when enabled at cache time, stored in separate folders `{user}--bookmarks` and `{user}--likes`, labeled `kind: bookmark|like`, never mixed with the user's original timeline.
 - Markdown export (Obsidian-friendly) and local `feed.xml` RSS for note-taking and reader workflows.
+- Optional in-app **check for updates** (v1.2): Settings shows the current version and can fetch a static JSON manifest (`update_manifest_url`); no silent auto-upgrade in the local-zip distribution model. Windows code signing is documented but optional ([SIGNING.md](SIGNING.md)).
 
 Undecided, do not lock:
 

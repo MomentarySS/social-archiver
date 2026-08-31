@@ -1,7 +1,7 @@
 {
   "name": "social-archiver",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.2.0",
   "main": "electron-main.js",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,8 @@
     "release:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-check.ps1",
     "release:pack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-pack.ps1",
     "version:print": "node scripts/print-version.mjs",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron --disable-gpu --disable-features=WebGL,WebGL2,WebGLRenderingContext .\"",
+    "electron:dev:inner": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron --disable-gpu --disable-features=WebGL,WebGL2,WebGLRenderingContext .\"",
+    "electron:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/electron-dev.ps1",
     "electron:build": "python scripts/write_icon.py && npm run build && python scripts/build_backend.py && electron-builder --win"
   },
   "dependencies": {
@@ -43,6 +44,9 @@
     "files": [
       "dist/**/*",
     "electron-main.js",
+    "electron/**/*",
+    "electron-archives.js",
+    "archive-post-time.js",
     "preload.js",
     "json-lines.js",
     "settings-merge.js",
