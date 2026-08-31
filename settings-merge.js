@@ -44,6 +44,12 @@ function applySettingsPatch(current, patch) {
   if (patch.notifications && typeof patch.notifications === 'object') {
     next.notifications = { ...(base.notifications || {}), ...patch.notifications };
   }
+  if (patch.batch_retry && typeof patch.batch_retry === 'object') {
+    next.batch_retry = { ...(base.batch_retry || {}), ...patch.batch_retry };
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'update_manifest_url')) {
+    next.update_manifest_url = patch.update_manifest_url;
+  }
   return next;
 }
 

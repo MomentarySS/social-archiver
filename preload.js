@@ -66,4 +66,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   probeFfmpeg: () => ipcRenderer.invoke('probe-ffmpeg'),
   transcodeArchives: (params) => ipcRenderer.invoke('transcode-archives', params),
   generatePosters: (params) => ipcRenderer.invoke('generate-posters', params),
+  getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  openUpdateNotes: (url) => ipcRenderer.invoke('open-update-notes', url),
 });

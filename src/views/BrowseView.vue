@@ -20,6 +20,11 @@
         @stop-batch="handleStopBatch"
         @update-schedule="handleUpdateSchedule"
       />
+      <BrowseCalendar
+        v-if="isUserMode && posts.length"
+        v-model="calendarDate"
+        :posts="posts"
+      />
     </aside>
 
     <!-- Right: Post timeline -->
@@ -88,6 +93,22 @@
               type="button"
               @click="clearDateFilter"
             >清除</button>
+          </div>
+          <div v-if="isUserMode && hashtagOptions.length" class="hashtag-filter">
+            <button
+              class="sa-pill-btn sa-pill-btn--ghost"
+              type="button"
+              :class="{ active: !selectedHashtag }"
+              @click="selectedHashtag = ''"
+            >全部话题</button>
+            <button
+              v-for="item in hashtagOptions.slice(0, 12)"
+              :key="item.tag"
+              class="sa-pill-btn sa-pill-btn--ghost"
+              type="button"
+              :class="{ active: selectedHashtag === item.tag }"
+              @click="selectedHashtag = item.tag"
+            >#{{ item.tag }} ({{ item.count }})</button>
           </div>
           <div
             v-if="isUserMode && posts.length"
@@ -265,7 +286,7 @@
         </div>
 
         <div v-else class="empty-state inner">
-          <p v-if="posts.length">当前日期范围内没有帖子</p>
+          <p v-if="posts.length">当前筛选条件下没有帖子</p>
           <p v-else-if="users.length">这个用户还没有可浏览的帖子</p>
           <p v-else>这个目录里还没有已缓存的用户</p>
         </div>
@@ -277,11 +298,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import BrowseHub from '../components/BrowseHub.vue'
+import BrowseCalendar from '../components/BrowseCalendar.vue'
 import LazyPost from '../components/LazyPost.vue'
 import MediaGallery from '../components/MediaGallery.vue'
 import UserManager from '../components/UserManager.vue'
 import { writeArchiveHtml } from '../utils/archiveHtml.js'
 import { sortPosts, filterPostsByDate } from '../utils/postTime.js'
+import { collectHashtagsFromPosts, filterPostsByHashtag } from '../utils/hashtags.js'
 import { highlightSnippet } from '../utils/highlight.ts'
 import { OPEN_POST_EVENT, type OpenPostDetail } from '../utils/navBus.ts'
 import { localAssetUrl } from '../utils/assetUrl.js'
@@ -334,6 +357,8 @@ const searching = ref(false)
 const pendingHash = ref('')
 const filterStartDate = ref('')
 const filterEndDate = ref('')
+const calendarDate = ref('')
+const selectedHashtag = ref('')
 const activeHighlightQuery = ref('')
 const exportMenuOpen = ref(false)
 const exportMenuRef = ref<HTMLElement | null>(null)
@@ -350,16 +375,17 @@ const showWeiboUpdateOptions = computed(() => {
   if (isAllUsersMode.value || !currentUser.value) return false
   return normalizePlatform(currentUser.value.platform, 'weibo') === 'weibo'
 })
-const filteredPosts = computed(() => filterPostsByDate(
-  posts.value,
-  filterStartDate.value,
-  filterEndDate.value,
-))
+const filteredPosts = computed(() => {
+  let list = filterPostsByDate(posts.value, filterStartDate.value, filterEndDate.value)
+  list = filterPostsByHashtag(list, selectedHashtag.value)
+  return list
+})
+const hashtagOptions = computed(() => collectHashtagsFromPosts(posts.value))
 const displayedPosts = computed(() => sortPosts(filteredPosts.value, sortOrder.value, { allUsers: isAllUsersMode.value }))
 const postCountLabel = computed(() => {
   const total = posts.value.length
   const shown = displayedPosts.value.length
-  if ((filterStartDate.value || filterEndDate.value) && shown !== total) {
+  if (((filterStartDate.value || filterEndDate.value) || selectedHashtag.value) && shown !== total) {
     return `${shown} / ${total} 篇`
   }
   return `${total} 篇`
@@ -371,6 +397,7 @@ function setSortOrder(order: 'newest' | 'oldest') {
 
 watch(selectedUser, () => {
   deepBacktrack.value = false
+  selectedHashtag.value = ''
 })
 
 watch(userStats, (stats) => {
@@ -485,7 +512,24 @@ function scrollToPostFromHash() {
 function clearDateFilter() {
   filterStartDate.value = ''
   filterEndDate.value = ''
+  calendarDate.value = ''
 }
+
+watch([filterStartDate, filterEndDate], ([start, end]) => {
+  if (start && start === end) {
+    calendarDate.value = start
+  } else if (!start && !end) {
+    calendarDate.value = ''
+  } else {
+    calendarDate.value = ''
+  }
+})
+
+watch(calendarDate, (value) => {
+  if (!value) return
+  filterStartDate.value = value
+  filterEndDate.value = value
+})
 
 function snippetHtml(hit: SearchHit) {
   return highlightSnippet(hit.snippet || '', searchQuery.value)
@@ -551,6 +595,10 @@ function resetToHub() {
   posts.value = []
   loading.value = false
   activeHighlightQuery.value = ''
+  selectedHashtag.value = ''
+  calendarDate.value = ''
+  filterStartDate.value = ''
+  filterEndDate.value = ''
   closeExportMenu()
   window.location.hash = ''
 }
@@ -1157,7 +1205,8 @@ async function exportHtml() {
   border-right: 1px solid var(--sa-edge);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   min-height: calc(100vh - 58px);
   max-height: calc(100vh - 58px);
   position: sticky;
@@ -1388,6 +1437,19 @@ async function exportHtml() {
 .date-sep {
   color: var(--sa-muted);
   font-size: 12px;
+}
+
+.hashtag-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  max-width: min(100%, 720px);
+}
+
+.hashtag-filter .sa-pill-btn.active {
+  border-color: var(--sa-accent);
+  background: color-mix(in srgb, var(--sa-accent) 16%, transparent);
 }
 
 :deep(.sa-search-mark) {

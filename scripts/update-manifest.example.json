@@ -1,0 +1,6 @@
+{
+  "version": "1.2.0",
+  "notesUrl": "https://example.com/social-archiver/CHANGELOG.html",
+  "zipUrl": "https://example.com/social-archiver/SocialArchiver-1.2.0-win.zip",
+  "releaseNotes": "Phase 7：日历导航、话题筛选、批量失败退避；设置页检查更新。"
+}
