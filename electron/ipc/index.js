@@ -12,7 +12,7 @@ function registerAllIpc(deps) {
   registerArchiveIpc({ settingsStore, backend });
   registerSettingsIpc(ctx, settingsStore);
   registerShellIpc(ctx, settingsStore);
-  registerMaintenanceIpc({ settingsStore, backend });
+  registerMaintenanceIpc({ ctx, settingsStore, backend });
   registerLoginIpc(ctx, settingsStore);
   return createDownloadIpc(ctx, settingsStore, backend, notify);
 }

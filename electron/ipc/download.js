@@ -32,36 +32,44 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
       return { cookie: job.cookie, refreshed: false, message: '' };
     }
     const current = String(job.cookie || '').trim();
+    const cacheIsUsable = hasUsableCookie('instagram', current);
+
+    if (cacheIsUsable && ctx.cookieValidation?.isFresh('instagram', job.userId, current)) {
+      return { cookie: current, refreshed: false, message: '' };
+    }
+
     const partition = await readInstagramSessionFromPartition();
-    if (partition.success && partition.cookie) {
-      const currentSid = extractCookieValue(current, 'sessionid');
-      const partitionSid = extractCookieValue(partition.cookie, 'sessionid');
-      if (partitionSid && currentSid === partitionSid) {
-        return { cookie: current || partition.cookie, refreshed: false, message: '' };
+    const partitionSid = partition.success ? extractCookieValue(partition.cookie, 'sessionid') : '';
+    const currentSid = extractCookieValue(current, 'sessionid');
+
+    if (partitionSid && currentSid && partitionSid === currentSid) {
+      if (cacheIsUsable) {
+        ctx.cookieValidation?.markValid('instagram', job.userId, current);
+        return { cookie: current, refreshed: false, message: '' };
       }
+    }
+
+    if (!cacheIsUsable) {
       if (partitionSid) {
+        ctx.cookieValidation?.markValid('instagram', job.userId, partition.cookie);
         const refreshed = await refreshInstagramCookie(settingsStore, job.userId);
         if (refreshed.refreshed && refreshed.cookie) {
           return {
             cookie: refreshed.cookie,
             refreshed: true,
-            message: refreshed.message || '已从应用内登录分区更新 Instagram sessionid',
+            message: refreshed.message || '已从应用内登录分区写入 Instagram sessionid',
           };
         }
       }
+      return { cookie: current, refreshed: false, message: 'Instagram Cookie 已失效或为空，请重新登录' };
     }
-    if (hasUsableCookie('instagram', current)) {
+
+    if (cacheIsUsable) {
+      ctx.cookieValidation?.markValid('instagram', job.userId, current);
       return { cookie: current, refreshed: false, message: '' };
     }
-    const refreshed = await refreshInstagramCookie(settingsStore, job.userId);
-    if (refreshed.refreshed && refreshed.cookie) {
-      return {
-        cookie: refreshed.cookie,
-        refreshed: true,
-        message: refreshed.message || '已从应用内登录分区更新 Instagram sessionid',
-      };
-    }
-    return { cookie: current, refreshed: false, message: refreshed.message || '' };
+
+    return { cookie: current, refreshed: false, message: '' };
   }
 
   function notifyInstagramCookieRefresh(message) {
@@ -183,6 +191,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
             count: evt.count,
             batch: true,
           });
+          ctx.cookieValidation?.markValid(job.platform, job.userId, job.cookie);
         }
         ctx.mainWindow?.webContents.send('batch:event', { ...evt, userId: job.userId, platform: job.platform });
       },
@@ -379,6 +388,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
               count: parsed.count,
             });
             notifyDesktop('Social Archiver', `已缓存 ${platform}/${userId}：${parsed.posts || 0} 篇`);
+            ctx.cookieValidation?.markValid(platform, userId, cookie);
           }
           ctx.mainWindow?.webContents.send('download:event', parsed);
         },

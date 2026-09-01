@@ -4,6 +4,21 @@
 
 版本号真源：`package.json` 的 `version`。发 zip 前见 [RELEASE.md](RELEASE.md)。
 
+## 1.2.2（2026-09-01）
+
+### 修复
+
+- 切换任务时不再因为远端 Cookie 校验抖动而反复弹登录窗
+- Instagram 应用内登录分区 Cookie 不再盲目覆盖已缓存的 per_user `sessionid`
+- Edge 导入不再覆盖同平台下其它用户的 per_user Cookie（之前会把同平台所有账号的缓存都改成 Edge 当前账号的 Cookie）
+
+### 缓存与登录
+
+- 新增进程内 30 分钟 Cookie 验证 TTL：缓存任务完成后或 `checkCookie` 确认有效后，30 分钟内切换任务免远端校验
+- 浏览页点「更新」先看 TTL，命中直接跑；X / Instagram / 微博都生效
+- 设置页 / 缓存页 Cookie 校验通过后自动写入 TTL；`refresh-instagram-session` 成功后同样标记
+- 进程内 Cookie 校验存储使用对象条目（避免原字符串 key 在 userId 含特殊字符时切分错位）
+
 ## 1.2.1（2026-08-31）
 
 ### 修复

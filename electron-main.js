@@ -9,6 +9,7 @@ const { registerAllIpc } = require('./electron/ipc');
 const { createScheduler } = require('./electron-scheduler');
 const { debugLog } = require('./electron/debug');
 const { configureDevSecurityWarnings, configureProductionCsp } = require('./electron/security');
+const { CookieValidationStore } = require('./electron/cookie-validation');
 
 configureDevSecurityWarnings(app);
 registerProtocolSchemes();
@@ -37,6 +38,7 @@ process.on('unhandledRejection', (reason) => {
 const settingsStore = createSettingsStore(ctx);
 const backend = createBackendSpawn(settingsStore);
 const notify = createNotifyHelpers(settingsStore);
+ctx.cookieValidation = new CookieValidationStore();
 
 function createWindow() {
   const browserOptions = {

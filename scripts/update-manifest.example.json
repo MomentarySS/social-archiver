@@ -1,6 +1,6 @@
 {
-  "version": "1.2.1",
+  "version": "1.2.2",
   "notesUrl": "https://example.com/social-archiver/CHANGELOG.html",
-  "zipUrl": "https://example.com/social-archiver/SocialArchiver-1.2.1-win.zip",
-  "releaseNotes": "修复 X 换用户 ct0、IG 离线轮播与 Edge 导入 per_user 同步；Instagram 分栏浏览卡。"
+  "zipUrl": "https://example.com/social-archiver/SocialArchiver-1.2.2-win.zip",
+  "releaseNotes": "切任务免重登：30 分钟进程内 Cookie 验证 TTL；IG 应用内登录分区不再盲覆盖 per_user sessionid；Edge 导入不再破坏同平台 per_user 缓存。"
 }

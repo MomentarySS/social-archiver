@@ -69,33 +69,25 @@ async function refreshInstagramCookie(settingsStore, userId) {
   };
 }
 
-async function applyBrowserCookieImports(settingsStore, imports) {
-  const settings = settingsStore.readSettings();
+async function applyBrowserCookieImports(settingsStore, imports, cookieValidation) {
   const patch = { cookies: {} };
-  const perUserPatch = {};
   let saved = 0;
 
   for (const item of imports || []) {
     if (!item?.cookie || !item?.platform) continue;
-    const platform = item.platform;
-    const key = platformCookieKey(platform);
+    const key = platformCookieKey(item.platform);
     patch.cookies[key] = item.cookie;
-    const prefix = `${platform}:`;
-    for (const userKey of Object.keys(settings?.cookies?.per_user || {})) {
-      if (userKey.startsWith(prefix)) {
-        perUserPatch[userKey] = item.cookie;
-      }
-    }
     saved += 1;
   }
 
   if (!saved) return { saved: 0, perUserUpdated: 0 };
 
-  if (Object.keys(perUserPatch).length) {
-    patch.cookies.per_user = perUserPatch;
-  }
   await settingsStore.saveSettingsPatch(patch);
-  return { saved, perUserUpdated: Object.keys(perUserPatch).length };
+
+  for (const item of imports || []) {
+    if (item?.platform) cookieValidation?.invalidatePlatform(item.platform);
+  }
+  return { saved, perUserUpdated: 0 };
 }
 
 module.exports = {
