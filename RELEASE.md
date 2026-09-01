@@ -52,9 +52,9 @@ npm.cmd run version:print
 
 ```json
 {
-  "version": "1.2.1",
+  "version": "1.2.2",
   "notesUrl": "https://你的站点/CHANGELOG.html",
-  "zipUrl": "https://你的站点/SocialArchiver-1.2.1-win.zip"
+  "zipUrl": "https://你的站点/SocialArchiver-1.2.2-win.zip"
 }
 ```
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
@@ -17,7 +17,7 @@ function createSettingsStore(initial) {
 }
 
 describe('applyBrowserCookieImports', () => {
-  it('updates platform cookie and matching per_user keys', async () => {
+  it('updates only the platform cookie and leaves per_user entries untouched', async () => {
     const store = createSettingsStore({
       cookies: {
         instagram: 'sessionid=old',
@@ -27,17 +27,34 @@ describe('applyBrowserCookieImports', () => {
         },
       },
     })
+    const cookieValidation = { invalidatePlatform: vi.fn() }
 
     const result = await applyBrowserCookieImports(store, [{
       platform: 'instagram',
       cookie: 'sessionid=new; csrftoken=x',
+    }], cookieValidation)
+
+    expect(result.saved).toBe(1)
+    expect(result.perUserUpdated).toBe(0)
+    expect(cookieValidation.invalidatePlatform).toHaveBeenCalledWith('instagram')
+    const next = store.readSettings()
+    expect(next.cookies.instagram).toBe('sessionid=new; csrftoken=x')
+    expect(next.cookies.per_user['instagram:ada']).toBe('sessionid=old-user')
+    expect(next.cookies.per_user['twitter:bob']).toBe('auth_token=a; ct0=b')
+  })
+
+  it('skips invalidates when no cookieValidation store is provided', async () => {
+    const store = createSettingsStore({
+      cookies: { instagram: 'sessionid=old', per_user: {} },
+    })
+
+    const result = await applyBrowserCookieImports(store, [{
+      platform: 'instagram',
+      cookie: 'sessionid=new',
     }])
 
     expect(result.saved).toBe(1)
-    expect(result.perUserUpdated).toBe(1)
-    const next = store.readSettings()
-    expect(next.cookies.instagram).toBe('sessionid=new; csrftoken=x')
-    expect(next.cookies.per_user['instagram:ada']).toBe('sessionid=new; csrftoken=x')
-    expect(next.cookies.per_user['twitter:bob']).toBe('auth_token=a; ct0=b')
+    expect(result.perUserUpdated).toBe(0)
+    expect(store.readSettings().cookies.instagram).toBe('sessionid=new')
   })
 })

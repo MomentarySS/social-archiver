@@ -37,7 +37,7 @@ npm.cmd run release:pack
 npm.cmd run electron:build
 ```
 
-产物（版本号见 `package.json` 的 `version`，当前 **1.2.1**）：
+产物（版本号见 `package.json` 的 `version`，当前 **1.2.2**）：
 
 - `dist-electron\SocialArchiver-<version>-win.zip` — 便携 zip，解压即用
 - `dist-electron\SocialArchiver-<version>-win.exe` — NSIS 安装包（开始菜单 + 卸载入口）
@@ -65,6 +65,8 @@ npm.cmd run electron:build
 **v1.2.0：** 设置页显示版本号并支持**检查更新**（可选 `update_manifest_url`，见 `scripts/update-manifest.example.json`）。批量缓存失败时**指数退避自动重试**（设置页可关）。打包版注入 Content-Security-Policy。
 
 **v1.2.1：** 修复 X 换用户时仍用过期 `ct0`；失败日志显示真实退出码。Instagram 浏览卡分栏布局；Edge 一键导入 Cookie；IG/X 用户名规范化；离线 HTML 轮播修复。
+
+**v1.2.2：** 切换任务不再因远端 Cookie 校验抖动重弹登录。进程内 30 分钟 Cookie 验证 TTL，缓存成功后免校验。Instagram 应用内登录分区不再盲覆盖已缓存的 `sessionid`；Edge 导入不再破坏同平台下其它账号的 per_user Cookie。
 
 ## 文档
 

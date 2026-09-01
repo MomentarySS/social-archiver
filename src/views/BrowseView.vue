@@ -325,6 +325,7 @@ const props = defineProps<{
 }>()
 
 const ALL_USERS_VALUE = '__all__'
+const COOKIE_VALID_TTL_MS = 30 * 60 * 1000
 
 const outputDir = ref('')
 const users = ref<UserEntry[]>([])
@@ -760,8 +761,19 @@ async function ensureCookie(platform: string, userId: string) {
   let cookie = cookieForUser(settings, platform, userId)
     || cookieForPlatform(settings, platform)
   if (hasUsableCookie(platform, cookie) && window.electronAPI) {
-    const check = await window.electronAPI.checkCookie({ platform, cookie })
-    if (check.valid) return cookie
+    const fresh = await window.electronAPI.isCookieRecentlyValidated({
+      platform,
+      userId,
+      cookie,
+      ttlMs: COOKIE_VALID_TTL_MS,
+    })
+    if (fresh) return cookie
+
+    const check = await window.electronAPI.checkCookie({ platform, cookie, userId })
+    if (check.valid) {
+      await window.electronAPI.markCookieValid({ platform, userId, cookie })
+      return cookie
+    }
   }
   toast.info(
     platform === 'twitter' ? '需要登录 X，打开登录窗'
@@ -773,12 +785,13 @@ async function ensureCookie(platform: string, userId: string) {
     toast.error(res.error || '登录失败。也可到缓存页或设置页粘贴 Cookie。')
     return ''
   }
-  const check = await window.electronAPI!.checkCookie({ platform, cookie: res.cookie })
+  const check = await window.electronAPI!.checkCookie({ platform, cookie: res.cookie, userId })
   if (!check.valid) {
     toast.error(check.message || '微博 Cookie 仍未处于登录状态，请完成登录后再关闭窗口')
     return ''
   }
   await saveUserCookie(platform, userId, res.cookie)
+  await window.electronAPI!.markCookieValid({ platform, userId, cookie: res.cookie })
   return res.cookie
 }
 

@@ -5,9 +5,10 @@ const {
   refreshInstagramCookie,
 } = require('../cookie-sources');
 
-function registerMaintenanceIpc({ settingsStore, backend }) {
+function registerMaintenanceIpc({ ctx, settingsStore, backend }) {
   const { rememberAssetRoot } = settingsStore;
   const { runBackendJsonLines } = backend;
+  const cookieValidation = ctx?.cookieValidation;
 
   ipcMain.handle('verify-archives', async (_event, { outputDir, platform, userId }) => {
     try {
@@ -59,7 +60,7 @@ function registerMaintenanceIpc({ settingsStore, backend }) {
       const failed = summaries.some((item) => item.ok === false);
       return { success: !failed, summaries, events };
     } catch (e) {
-      return { success: false, error: e.message, summaries: [] };
+      return { success: false, error: e.message, summaries: [], events: [] };
     }
   });
 
@@ -79,11 +80,11 @@ function registerMaintenanceIpc({ settingsStore, backend }) {
       const failed = summaries.some((item) => item.ok === false);
       return { success: !failed, summaries, events };
     } catch (e) {
-      return { success: false, error: e.message, summaries: [] };
+      return { success: false, error: e.message, summaries: [], events: [] };
     }
   });
 
-  ipcMain.handle('check-cookie', async (_event, { platform, cookie }) => {
+  ipcMain.handle('check-cookie', async (_event, { platform, cookie, userId } = {}) => {
     try {
       const args = ['--check-cookie', '--platform', platform];
       const events = await runBackendJsonLines(args, { cookie, platform });
@@ -92,10 +93,26 @@ function registerMaintenanceIpc({ settingsStore, backend }) {
         const err = events.find((e) => e.type === 'error');
         return { valid: false, message: err?.msg || '预检失败' };
       }
-      return { valid: Boolean(result.valid), message: result.message || '' };
+      const valid = Boolean(result.valid);
+      if (valid && cookie && platform && cookieValidation) {
+        cookieValidation.markValid(platform, userId || '', cookie);
+      }
+      return { valid, message: result.message || '' };
     } catch (e) {
       return { valid: false, message: e.message };
     }
+  });
+
+  ipcMain.handle('mark-cookie-valid', async (_event, { platform, userId, cookie } = {}) => {
+    if (cookieValidation && platform && cookie) {
+      cookieValidation.markValid(platform, userId || '', cookie);
+    }
+    return { success: true };
+  });
+
+  ipcMain.handle('is-cookie-recently-validated', async (_event, { platform, userId, cookie, ttlMs } = {}) => {
+    if (!cookieValidation || !platform || !cookie) return false;
+    return cookieValidation.isFresh(platform, userId || '', cookie, ttlMs);
   });
 
   ipcMain.handle('import-browser-cookies', async (_event, { browser = 'edge', platform } = {}) => {
@@ -115,7 +132,11 @@ function registerMaintenanceIpc({ settingsStore, backend }) {
       if (!imports.length && err) {
         return { success: false, error: err.msg, browser, imports: [] };
       }
-      await applyBrowserCookieImports(settingsStore, imports.filter((item) => item.cookie));
+      await applyBrowserCookieImports(
+        settingsStore,
+        imports.filter((item) => item.cookie),
+        cookieValidation,
+      );
       return { success: true, browser, imports };
     } catch (e) {
       return { success: false, error: e.message, browser, imports: [] };
@@ -124,7 +145,11 @@ function registerMaintenanceIpc({ settingsStore, backend }) {
 
   ipcMain.handle('refresh-instagram-session', async (_event, { userId } = {}) => {
     try {
-      return await refreshInstagramCookie(settingsStore, userId || '');
+      const result = await refreshInstagramCookie(settingsStore, userId || '');
+      if (result.refreshed && result.cookie && cookieValidation) {
+        cookieValidation.markValid('instagram', userId || '', result.cookie);
+      }
+      return result;
     } catch (e) {
       return { refreshed: false, cookie: '', message: e.message };
     }

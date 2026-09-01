@@ -52,7 +52,9 @@ export interface ElectronAPI {
   searchArchives: (params: { outputDir: string; query: string; rebuild?: boolean }) => Promise<SearchResult>
   rebuildSearchIndex: (outputDir: string) => Promise<{ success: boolean; count?: number; error?: string }>
   verifyArchives: (params: { outputDir: string; platform?: string; userId?: string }) => Promise<VerifyResult>
-  checkCookie: (params: { platform: string; cookie: string }) => Promise<CookieCheckResult>
+  checkCookie: (params: { platform: string; cookie: string; userId?: string }) => Promise<CookieCheckResult>
+  markCookieValid: (params: { platform: string; userId?: string; cookie: string }) => Promise<{ success: boolean }>
+  isCookieRecentlyValidated: (params: { platform: string; userId?: string; cookie: string; ttlMs?: number }) => Promise<boolean>
   importBrowserCookies: (params?: { browser?: string; platform?: string }) => Promise<ImportBrowserCookiesResult>
   refreshInstagramSession: (params?: { userId?: string }) => Promise<RefreshInstagramSessionResult>
   getPortableInfo: () => Promise<PortableInfo>
