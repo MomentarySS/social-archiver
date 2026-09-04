@@ -59,12 +59,12 @@ const invalid = computed(() => hasInvalidHandleChars(draft.value, props.platform
 
 const hint = computed(() => {
   if (props.platform === 'instagram') {
-    return 'Instagram 用户名请用英文输入法；下方会显示实际将提交的 ID（等宽字体，下划线可见）。'
+    return '可粘贴主页链接。用户名用英文输入法；下方显示将提交的 ID。'
   }
   if (props.platform === 'twitter') {
-    return 'X 用户名不含空格；会自动去掉开头的 @。'
+    return '可粘贴 x.com / twitter.com 主页链接；会自动去掉开头的 @。'
   }
-  return ''
+  return '可粘贴 weibo.com/u/数字 或 m.weibo.cn 主页链接。'
 })
 
 watch(

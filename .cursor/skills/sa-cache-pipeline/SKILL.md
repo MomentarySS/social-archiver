@@ -22,7 +22,7 @@ Must stay in sync: `src/utils/session.js`, `electron/cookie-rules.js`, `backend/
 | X | `auth_token` **and** `ct0` | Guest token is not enough. |
 | Instagram | `sessionid` | No username/password. Private accounts need follow. |
 
-Lookup: `per_user["platform:userId"]` then platform key (`twitter` / `weibo` / `instagram`). Batch jobs must re-read Cookie at **task start**, not from the enqueue snapshot. **Edge import** (`applyBrowserCookieImports`) writes the platform global key and every existing `per_user` key for that platform (browser single-login assumption).
+Lookup: `per_user["platform:userId"]` then platform key (`twitter` / `weibo` / `instagram`). Batch jobs must re-read Cookie at **task start**, not from the enqueue snapshot. **Edge import** (`applyBrowserCookieImports`) writes the platform global key only; existing `per_user` keys stay (v1.2.2). User id fields accept profile URLs (`x.com/…`, `instagram.com/…`, `weibo.com/u/…`) via `normalizeUserId`.
 
 ## X session Cookie (v1.2.1)
 

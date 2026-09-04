@@ -1,6 +1,6 @@
 {
-  "version": "1.2.2",
+  "version": "1.2.3",
   "notesUrl": "https://example.com/social-archiver/CHANGELOG.html",
-  "zipUrl": "https://example.com/social-archiver/SocialArchiver-1.2.2-win.zip",
-  "releaseNotes": "切任务免重登：30 分钟进程内 Cookie 验证 TTL；IG 应用内登录分区不再盲覆盖 per_user sessionid；Edge 导入不再破坏同平台 per_user 缓存。"
+  "zipUrl": "https://example.com/social-archiver/SocialArchiver-1.2.3-win.zip",
+  "releaseNotes": "粘贴主页链接抽出用户 ID；已登录 Cookie 默认折叠；浏览添加用户与缓存页共用登录组件；切 tab 记住当前浏览用户。"
 }

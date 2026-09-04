@@ -228,7 +228,9 @@ Two semantic palettes exposed as CSS variables (`--sa-*`). Browse can override t
 
 Browse is full-bleed under a thin tab strip. The feed is a 600px column on paper (light) or void (dark). Sticky archive bar is 8px 16px with a 12px blur. Theme toggle lives in the app top bar. Posts pad 12px 16px. Weibo media maxes near 360px with 4px gutters; X media maxes near 510px with 2px gutters and a 16px clip. Avatar is 50px on Weibo/IG posts, 40px on X, 72px on the profile. Empty states are centered, quiet, no illustration.
 
-**Archive overview (Browse hub):** Default Browse right pane before any account is opened. Same 600px column, no avatars or media thumbnails. Header title + muted lede, summary strip on `--sa-field`, clickable user rows with platform pill + name + text-only stats. User mode shows a ghost **返回概览** pill in the sticky bar.
+**Archive overview (Browse hub):** Default Browse right pane before any account is opened. Same 600px column, no avatars or media thumbnails. Header title + muted lede, summary strip on `--sa-field`, clickable user rows with platform pill + name + text-only stats. User mode shows a ghost **返回概览** pill in the sticky bar. Switching to Cache/Settings does not reset the hub; the session keeps the open user.
+
+**Browse bar (v1.2.3):** Two rows. Primary: back, account select, directory, refresh, update/export. Filters: search, date, timeline/gallery, sort, hashtag pills on a wrapping second row.
 
 **User timeline sidebar (v1.2):** When viewing one account, a compact month calendar lists days with posts (`_posts/{date}/`). Clicking a day filters the timeline to that date; works with the top-bar date range picker.
 

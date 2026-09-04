@@ -4,7 +4,7 @@
     <div class="um-header">
       <span class="um-title">用户管理</span>
       <div class="um-header-actions">
-        <button class="ghost-btn" type="button" @click="showAddForm = !showAddForm">
+        <button class="ghost-btn" type="button" @click="toggleAddForm">
           {{ showAddForm ? '取消' : '+ 添加用户' }}
         </button>
       </div>
@@ -12,34 +12,16 @@
 
     <!-- Add User Form -->
     <div v-if="showAddForm" class="um-add-form">
-      <div class="um-form-row">
-        <select v-model="addForm.platform" class="um-select">
+      <label class="um-field">
+        <span>平台</span>
+        <select v-model="addForm.platform" class="um-select um-select-block">
           <option value="weibo">微博</option>
           <option value="twitter">X / Twitter</option>
           <option value="instagram">Instagram</option>
         </select>
-        <input
-          v-model="addForm.userId"
-          class="um-input"
-          type="text"
-          :placeholder="platformUserIdPlaceholder"
-          autocomplete="off"
-        />
-      </div>
-      <div class="um-form-row">
-        <input
-          v-model="addForm.cookie"
-          class="um-input um-input-wide"
-          type="password"
-          :placeholder="platformCookiePlaceholder"
-          autocomplete="off"
-        />
-      </div>
-      <div v-if="addForm.cookie.trim()" class="cookie-hint-row">
-        <span class="cookie-hint" :class="addFormValid ? 'ok' : 'miss'">
-          {{ addFormValid ? '✓ Cookie 格式正确' : '✗ 缺少必需字段' }}
-        </span>
-      </div>
+      </label>
+      <UserIdInput v-model="addForm.userId" :platform="addForm.platform" />
+      <CookieInput v-model="addForm.cookie" :platform="addForm.platform" />
       <div class="um-form-row">
         <input
           v-model="addForm.startDate"
@@ -239,7 +221,10 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { hasUsableCookie } from '../utils/session.js'
+import CookieInput from './CookieInput.vue'
+import UserIdInput from './UserIdInput.vue'
+import { cookieForPlatform, hasUsableCookie } from '../utils/session.js'
+import { hasInvalidHandleChars, normalizeUserId } from '../utils/userId.js'
 import type { UserEntry } from '../electron-api.d.ts'
 
 interface BatchStatus {
@@ -309,20 +294,10 @@ const batchPercent = computed(() => {
 })
 
 const addFormValid = computed(() => {
-  if (!addForm.value.userId.trim()) return false
+  const account = normalizeUserId(addForm.value.userId, addForm.value.platform)
+  if (!account) return false
+  if (hasInvalidHandleChars(account, addForm.value.platform)) return false
   return hasUsableCookie(addForm.value.platform, addForm.value.cookie)
-})
-
-const platformUserIdPlaceholder = computed(() => {
-  if (addForm.value.platform === 'twitter') return 'X handle（如 amd）'
-  if (addForm.value.platform === 'instagram') return 'Instagram 用户名（如 username）'
-  return '微博 UID（如 1195230310）'
-})
-
-const platformCookiePlaceholder = computed(() => {
-  if (addForm.value.platform === 'twitter') return 'auth_token=xxx; ct0=xxx'
-  if (addForm.value.platform === 'instagram') return 'sessionid=xxx'
-  return 'm.weibo.cn 的完整 Cookie'
 })
 
 // ─── Methods ────────────────────────────────────────────────────
@@ -382,9 +357,10 @@ function toggleAll() {
 
 function submitAddUser() {
   if (!addFormValid.value) return
+  const account = normalizeUserId(addForm.value.userId, addForm.value.platform)
   emit('add-user', {
     platform: addForm.value.platform,
-    userId: addForm.value.userId.trim(),
+    userId: account,
     cookie: addForm.value.cookie.trim(),
     startDate: addForm.value.startDate || undefined,
     endDate: addForm.value.endDate || undefined,
@@ -412,6 +388,33 @@ async function doDelete() {
   deleteTarget.value = null
   emit('delete-user', user)
 }
+
+async function loadCookieForPlatform() {
+  if (!window.electronAPI) return
+  try {
+    const settings = await window.electronAPI.getSettings()
+    addForm.value.cookie = cookieForPlatform(settings, addForm.value.platform) || ''
+  } catch {
+    addForm.value.cookie = ''
+  }
+}
+
+async function toggleAddForm() {
+  if (showAddForm.value) {
+    showAddForm.value = false
+    return
+  }
+  await loadCookieForPlatform()
+  showAddForm.value = true
+}
+
+watch(
+  () => addForm.value.platform,
+  async () => {
+    if (!showAddForm.value) return
+    await loadCookieForPlatform()
+  },
+)
 
 function startBatchUpdate() {
   const selected = props.users.filter(u => checkedUsers.value.has(u.path))
@@ -490,6 +493,30 @@ watch(() => props.users, () => {
   background: var(--sa-surface);
   color: var(--sa-ink);
   min-width: 90px;
+}
+
+.um-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--sa-muted);
+}
+
+.um-select-block {
+  width: 100%;
+  min-width: 0;
+}
+
+.um-add-form :deep(.cookie-input),
+.um-add-form :deep(.user-id-input) {
+  margin-bottom: 10px;
+}
+
+.um-add-form :deep(.sa-btn) {
+  font-size: 12px;
+  padding: 0 10px;
 }
 
 .um-input {
