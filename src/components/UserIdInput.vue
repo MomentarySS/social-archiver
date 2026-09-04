@@ -20,6 +20,7 @@
       将缓存：<code>@{{ preview }}</code>
       <span v-if="invalid" class="user-id-warn">（含空格，请改成下划线 _）</span>
     </p>
+    <p v-else-if="invalid" class="user-id-warn-line">{{ invalidHint }}</p>
     <p v-if="hint" class="user-id-hint">{{ hint }}</p>
   </label>
 </template>
@@ -57,6 +58,12 @@ const preview = computed(() => (
 
 const invalid = computed(() => hasInvalidHandleChars(draft.value, props.platform))
 
+const invalidHint = computed(() => (
+  props.platform === 'weibo'
+    ? '微博请用数字 UID，或粘贴 weibo.com/u/数字（自定义域名抽不出 UID）。'
+    : '含空格，请改成下划线 _'
+))
+
 const hint = computed(() => {
   if (props.platform === 'instagram') {
     return '可粘贴主页链接。用户名用英文输入法；下方显示将提交的 ID。'
@@ -64,7 +71,7 @@ const hint = computed(() => {
   if (props.platform === 'twitter') {
     return '可粘贴 x.com / twitter.com 主页链接；会自动去掉开头的 @。'
   }
-  return '可粘贴 weibo.com/u/数字 或 m.weibo.cn 主页链接。'
+  return '可粘贴 weibo.com/u/数字 或 m.weibo.cn/u/数字。自定义域名主页无法抽出 UID。'
 })
 
 watch(
@@ -135,6 +142,12 @@ function onPaste(event: ClipboardEvent) {
   margin-left: 6px;
   color: #c41e3a;
   font-size: 12px;
+}
+
+.user-id-warn-line {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #c41e3a;
 }
 
 .user-id-hint {

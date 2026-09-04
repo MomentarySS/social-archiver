@@ -22,7 +22,7 @@ Must stay in sync: `src/utils/session.js`, `electron/cookie-rules.js`, `backend/
 | X | `auth_token` **and** `ct0` | Guest token is not enough. |
 | Instagram | `sessionid` | No username/password. Private accounts need follow. |
 
-Lookup: `per_user["platform:userId"]` then platform key (`twitter` / `weibo` / `instagram`). Batch jobs must re-read Cookie at **task start**, not from the enqueue snapshot. **Edge import** (`applyBrowserCookieImports`) writes the platform global key only; existing `per_user` keys stay (v1.2.2). User id fields accept profile URLs (`x.com/…`, `instagram.com/…`, `weibo.com/u/…`) via `normalizeUserId`.
+Lookup: `per_user["platform:userId"]` then platform key (`twitter` / `weibo` / `instagram`). Batch jobs must re-read Cookie at **task start**, not from the enqueue snapshot. **Edge import** (`applyBrowserCookieImports`) writes the platform global key only; existing `per_user` keys stay (v1.2.2). User id fields accept profile URLs (`x.com/…`, `instagram.com/…`, `weibo.com/u/…`) via `normalizeUserId`. Weibo IDs must be numeric UIDs; nickname / custom-domain URLs are rejected.
 
 ## X session Cookie (v1.2.1)
 
@@ -45,7 +45,7 @@ Do not use `x.com/{handle}/media`. URLs: handle → `/tweets`; numeric → `/id:
 ## Instagram
 
 - Incremental via `.download-archive.sqlite`. Do not disable it for large accounts.
-- Sync from `persist:instagram-login` only when `sessionid` is missing or differs (`electron/cookie-sources.js`).
+- Trust a usable cached `sessionid`. Sync from `persist:instagram-login` only when the cache is empty or unusable (`resolveInstagramJobCookie`).
 - Stories are 24h; keep the existing warning.
 
 ## gallery-dl

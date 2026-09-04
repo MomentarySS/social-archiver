@@ -101,5 +101,8 @@ export function hasInvalidHandleChars(value, platform) {
   if (platform === 'instagram' || platform === 'twitter' || platform === 'x') {
     return /\s/.test(text)
   }
+  if (platform === 'weibo') {
+    return !/^\d+$/.test(text)
+  }
   return false
 }

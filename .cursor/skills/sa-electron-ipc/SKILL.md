@@ -46,4 +46,4 @@ Send to renderer with `webContents.send` optional-chaining; the window may alrea
 
 ## Tests
 
-`tests/electron-archives.test.js` (fixture scan → get-posts), `tests/update-check.test.js`. Cookie merge: `src/utils/jsonLines.test.ts` / settings-merge coverage. Do not log raw Cookie.
+`tests/electron-archives.test.js` (fixture scan → get-posts), `tests/electron-cookie-validation.test.js` (TTL), `tests/electron-cookie-sources.test.js` (Edge import does not overwrite `per_user`), `tests/update-check.test.js`. Cookie merge: `src/utils/jsonLines.test.ts` / settings-merge coverage. Do not log raw Cookie.
