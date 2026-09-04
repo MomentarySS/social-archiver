@@ -2,6 +2,17 @@
   <div class="cookie-input">
     <div class="sa-label">登录</div>
 
+    <div v-if="compact" class="cookie-compact">
+      <span class="cookie-hint ok">已登录</span>
+      <div class="sa-row cookie-actions">
+        <button class="sa-btn sa-btn-ghost" type="button" @click="revealForm">重新登录</button>
+        <button class="sa-btn sa-btn-ghost" type="button" :disabled="loggingIn" @click="importCurrentFromEdge">
+          从 Edge 导入
+        </button>
+      </div>
+    </div>
+
+    <template v-else>
     <template v-if="platform === 'twitter'">
       <label class="sa-field">
         <span>auth_token</span>
@@ -117,13 +128,20 @@
         <code>SUB</code>。应用内登录若闪退，改用浏览器粘贴。
       </p>
     </template>
+    <button
+      v-if="hasSavedCookie"
+      class="sa-btn sa-btn-ghost cookie-collapse"
+      type="button"
+      @click="collapseForm"
+    >收起</button>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useToast } from '../composables/useToast'
-import { savePlatformCookie } from '../utils/session.js'
+import { hasUsableCookie, savePlatformCookie } from '../utils/session.js'
 import type { BrowserCookieImportItem } from '../electron-api.d.ts'
 
 const props = defineProps<{
@@ -141,12 +159,31 @@ const ct0 = ref('')
 const extraCookies = ref('')
 const sessionid = ref('')
 const toast = useToast()
+const revealed = ref(false)
+const dirty = ref(false)
 
 const weiboHasSub = computed(() => /\bSUB=/.test(props.modelValue || ''))
+const hasSavedCookie = computed(() => hasUsableCookie(props.platform, props.modelValue))
+const compact = computed(() => hasSavedCookie.value && !revealed.value && !dirty.value)
+
+function revealForm() {
+  revealed.value = true
+}
+
+function collapseForm() {
+  revealed.value = false
+  dirty.value = false
+}
+
+function markDirty() {
+  dirty.value = true
+}
 
 watch(
   () => props.platform,
   (platform) => {
+    revealed.value = false
+    dirty.value = false
     if (platform === 'twitter' && (props.modelValue || '').startsWith('browser:')) {
       emit('update:modelValue', '')
     }
@@ -194,6 +231,7 @@ function parseCookieMap(raw: string): Record<string, string> {
 }
 
 function emitTwitterCookie() {
+  markDirty()
   const parts: string[] = []
   if (authToken.value.trim()) parts.push(`auth_token=${authToken.value.trim()}`)
   if (ct0.value.trim()) parts.push(`ct0=${ct0.value.trim()}`)
@@ -202,6 +240,7 @@ function emitTwitterCookie() {
 }
 
 function emitInstagramCookie() {
+  markDirty()
   const parsed = parseCookieMap(props.modelValue || '')
   if (sessionid.value.trim()) parsed.sessionid = sessionid.value.trim()
   else delete parsed.sessionid
@@ -214,6 +253,7 @@ function emitInstagramCookie() {
 }
 
 function onChange(value: string) {
+  markDirty()
   emit('update:modelValue', value)
 }
 
@@ -225,6 +265,7 @@ async function handleWeiboLogin() {
       if (res.success && res.cookie) {
         emit('update:modelValue', res.cookie)
         await savePlatformCookie('weibo', res.cookie)
+        collapseForm()
         toast.success('微博登录成功，Cookie 已保存')
       } else {
         toast.error(res.error || '登录失败')
@@ -245,6 +286,7 @@ async function handleTwitterLogin() {
       if (res.success && res.cookie) {
         emit('update:modelValue', res.cookie)
         await savePlatformCookie('twitter', res.cookie)
+        collapseForm()
         toast.success('X 登录成功，auth_token 和 ct0 已分别填入')
       } else {
         toast.error(res.error || '登录失败')
@@ -265,6 +307,7 @@ async function handleInstagramLogin() {
       if (res.success && res.cookie) {
         emit('update:modelValue', res.cookie)
         await savePlatformCookie('instagram', res.cookie)
+        collapseForm()
         toast.success('Instagram 登录成功，sessionid 已自动填入')
       } else {
         toast.error(res.error || '登录失败')
@@ -301,6 +344,7 @@ async function importCurrentFromEdge() {
     }
     applyImportedCookie(item)
     await savePlatformCookie(props.platform, item.cookie)
+    collapseForm()
     if (item.valid) toast.success(item.message || '已从 Edge 导入并校验通过')
     else toast.warning(item.message || '已导入，但校验未通过')
   } catch (e) {
@@ -321,8 +365,10 @@ async function refreshInstagramPartition() {
     }
     emit('update:modelValue', res.cookie)
     const check = await window.electronAPI.checkCookie({ platform: 'instagram', cookie: res.cookie })
-    if (check.valid) toast.success(check.message || '已刷新 Instagram sessionid')
-    else toast.warning(check.message || '已刷新，但校验未通过')
+    if (check.valid) {
+      collapseForm()
+      toast.success(check.message || '已刷新 Instagram sessionid')
+    } else toast.warning(check.message || '已刷新，但校验未通过')
   } catch (e) {
     toast.error('刷新应用内登录失败')
   } finally {
@@ -349,6 +395,18 @@ async function openSite(url: string, message: string) {
 
 .cookie-actions {
   margin-bottom: 4px;
+}
+
+.cookie-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.cookie-collapse {
+  margin-top: 4px;
 }
 
 .cookie-hint {

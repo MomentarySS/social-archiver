@@ -30,35 +30,92 @@
     <!-- Right: Post timeline -->
     <main class="browse-main">
       <header class="browse-bar">
-        <div class="bar-left">
-          <button
-            v-if="isUserMode"
-            class="sa-pill-btn sa-pill-btn--ghost"
-            type="button"
-            @click="resetToHub"
-          >返回概览</button>
-          <span v-else-if="outputDir" class="hub-label">存档概览</span>
-          <label v-if="isUserMode" class="user-field">
-            <span>存档</span>
-            <select v-model="selectedUser" :disabled="!users.length" @change="onUserSelectChange">
-              <option value="" disabled>{{ users.length ? '选择用户' : '还没有存档' }}</option>
-              <option v-if="users.length > 1" :value="ALL_USERS_VALUE">全部用户（只读）</option>
-              <option v-for="user in users" :key="user.path" :value="user.path">
-                {{ user.displayName || user.name }}
-              </option>
-            </select>
-          </label>
-          <button class="sa-pill-btn sa-pill-btn--ghost" type="button" @click="chooseOutputDir">更换目录</button>
-          <button
-            v-if="outputDir"
-            class="sa-pill-btn sa-pill-btn--ghost"
-            type="button"
-            :disabled="loading || updating || statsLoading"
-            @click="refreshBrowse"
-          >刷新</button>
+        <div class="bar-row bar-primary">
+          <div class="bar-left">
+            <button
+              v-if="isUserMode"
+              class="sa-pill-btn sa-pill-btn--ghost"
+              type="button"
+              @click="resetToHub"
+            >返回概览</button>
+            <span v-else-if="outputDir" class="hub-label">存档概览</span>
+            <label v-if="isUserMode" class="user-field">
+              <span>存档</span>
+              <select v-model="selectedUser" :disabled="!users.length" @change="onUserSelectChange">
+                <option value="" disabled>{{ users.length ? '选择用户' : '还没有存档' }}</option>
+                <option v-if="users.length > 1" :value="ALL_USERS_VALUE">全部用户（只读）</option>
+                <option v-for="user in users" :key="user.path" :value="user.path">
+                  {{ user.displayName || user.name }}
+                </option>
+              </select>
+            </label>
+            <button class="sa-pill-btn sa-pill-btn--ghost" type="button" @click="chooseOutputDir">更换目录</button>
+            <button
+              v-if="outputDir"
+              class="sa-pill-btn sa-pill-btn--ghost"
+              type="button"
+              :disabled="loading || updating || statsLoading"
+              @click="refreshBrowse"
+            >刷新</button>
+          </div>
+          <div class="bar-actions">
+            <label
+              v-if="isUserMode && showWeiboUpdateOptions"
+              class="bar-check"
+              title="忽略「连续已缓存即停」，从断点继续拉更早微博"
+            >
+              <input v-model="deepBacktrack" type="checkbox" />
+              <span>深度回溯</span>
+            </label>
+            <button
+              v-if="isUserMode && currentUser && !isAllUsersMode"
+              class="sa-pill-btn sa-pill-btn--primary"
+              type="button"
+              :disabled="updating || exporting"
+              @click="updateArchive"
+            >
+              {{ updating ? '更新中…' : '更新' }}
+            </button>
+            <button
+              v-if="isUserMode && updating"
+              class="sa-pill-btn sa-pill-btn--ghost"
+              type="button"
+              @click="stopUpdate"
+            >停止</button>
+            <div
+              v-if="isUserMode && posts.length && !isAllUsersMode"
+              ref="exportMenuRef"
+              class="bar-menu"
+            >
+              <button
+                class="sa-pill-btn sa-pill-btn--ghost"
+                type="button"
+                :disabled="exporting || updating"
+                aria-haspopup="menu"
+                :aria-expanded="exportMenuOpen"
+                @click.stop="exportMenuOpen = !exportMenuOpen"
+              >
+                {{ exporting ? '导出中…' : '导出' }}
+              </button>
+              <div v-if="exportMenuOpen" class="bar-menu-panel" role="menu" @click.stop>
+                <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('markdown')">
+                  Markdown
+                </button>
+                <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('rss')">
+                  RSS
+                </button>
+                <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('json')">
+                  JSON
+                </button>
+                <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('html')">
+                  离线 HTML
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="bar-right">
-          <div v-if="outputDir" class="search-box">
+        <div v-if="outputDir" class="bar-row bar-filters">
+          <div class="search-box">
             <input
               v-model="searchQuery"
               class="search-input"
@@ -71,7 +128,7 @@
               {{ searching ? '…' : '搜' }}
             </button>
           </div>
-          <div v-if="isUserMode && outputDir && posts.length" class="date-filter">
+          <div v-if="isUserMode && posts.length" class="date-filter">
             <input
               v-model="filterStartDate"
               class="date-input"
@@ -93,22 +150,6 @@
               type="button"
               @click="clearDateFilter"
             >清除</button>
-          </div>
-          <div v-if="isUserMode && hashtagOptions.length" class="hashtag-filter">
-            <button
-              class="sa-pill-btn sa-pill-btn--ghost"
-              type="button"
-              :class="{ active: !selectedHashtag }"
-              @click="selectedHashtag = ''"
-            >全部话题</button>
-            <button
-              v-for="item in hashtagOptions.slice(0, 12)"
-              :key="item.tag"
-              class="sa-pill-btn sa-pill-btn--ghost"
-              type="button"
-              :class="{ active: selectedHashtag === item.tag }"
-              @click="selectedHashtag = item.tag"
-            >#{{ item.tag }} ({{ item.count }})</button>
           </div>
           <div
             v-if="isUserMode && posts.length"
@@ -153,58 +194,21 @@
             >最早在前</button>
           </div>
           <span v-if="isUserMode && posts.length" class="post-count">{{ postCountLabel }}</span>
-          <label
-            v-if="isUserMode && showWeiboUpdateOptions"
-            class="bar-check"
-            title="忽略「连续已缓存即停」，从断点继续拉更早微博"
-          >
-            <input v-model="deepBacktrack" type="checkbox" />
-            <span>深度回溯</span>
-          </label>
-          <button
-            v-if="isUserMode && currentUser && !isAllUsersMode"
-            class="sa-pill-btn sa-pill-btn--primary"
-            type="button"
-            :disabled="updating || exporting"
-            @click="updateArchive"
-          >
-            {{ updating ? '更新中…' : '更新' }}
-          </button>
-          <button
-            v-if="isUserMode && updating"
-            class="sa-pill-btn sa-pill-btn--ghost"
-            type="button"
-            @click="stopUpdate"
-          >停止</button>
-          <div
-            v-if="isUserMode && posts.length && !isAllUsersMode"
-            ref="exportMenuRef"
-            class="bar-menu"
-          >
+          <div v-if="isUserMode && hashtagOptions.length" class="hashtag-filter">
             <button
               class="sa-pill-btn sa-pill-btn--ghost"
               type="button"
-              :disabled="exporting || updating"
-              aria-haspopup="menu"
-              :aria-expanded="exportMenuOpen"
-              @click.stop="exportMenuOpen = !exportMenuOpen"
-            >
-              {{ exporting ? '导出中…' : '导出' }}
-            </button>
-            <div v-if="exportMenuOpen" class="bar-menu-panel" role="menu" @click.stop>
-              <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('markdown')">
-                Markdown
-              </button>
-              <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('rss')">
-                RSS
-              </button>
-              <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('json')">
-                JSON
-              </button>
-              <button type="button" role="menuitem" :disabled="exporting || updating" @click="runExport('html')">
-                离线 HTML
-              </button>
-            </div>
+              :class="{ active: !selectedHashtag }"
+              @click="selectedHashtag = ''"
+            >全部话题</button>
+            <button
+              v-for="item in hashtagOptions.slice(0, 12)"
+              :key="item.tag"
+              class="sa-pill-btn sa-pill-btn--ghost"
+              type="button"
+              :class="{ active: selectedHashtag === item.tag }"
+              @click="selectedHashtag = item.tag"
+            >#{{ item.tag }} ({{ item.count }})</button>
           </div>
         </div>
       </header>
@@ -335,7 +339,6 @@ const loading = ref(false)
 const statsLoading = ref(false)
 const browseMode = ref<'hub' | 'user'>('hub')
 const archiveStats = ref<ArchiveStats | null>(null)
-const skipNextHubReset = ref(false)
 const exporting = ref(false)
 const updating = ref(false)
 const headerAvatar = ref('')
@@ -585,7 +588,6 @@ async function openPostFromNav(detail: OpenPostDetail) {
 }
 
 function onOpenPostEvent(event: Event) {
-  skipNextHubReset.value = true
   const detail = (event as CustomEvent<OpenPostDetail>).detail
   if (detail) void openPostFromNav(detail)
 }
@@ -630,12 +632,8 @@ async function loadArchiveStats() {
 }
 
 watch(() => props.active, (isActive, wasActive) => {
-  if (isActive && wasActive === false) {
-    if (skipNextHubReset.value) {
-      skipNextHubReset.value = false
-      return
-    }
-    resetToHub()
+  if (isActive && wasActive === false && browseMode.value === 'hub' && outputDir.value) {
+    void loadArchiveStats()
   }
 })
 
@@ -1237,14 +1235,33 @@ async function exportHtml() {
   top: 58px;
   z-index: 5;
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   padding: 8px 16px;
   backdrop-filter: blur(12px);
   background: var(--sa-bar-bg);
   border-bottom: 1px solid var(--sa-edge);
+}
+
+.bar-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.bar-left,
+.bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bar-filters {
+  padding-top: 2px;
 }
 
 .bar-left,
@@ -1457,7 +1474,7 @@ async function exportHtml() {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  max-width: min(100%, 720px);
+  flex: 1 1 100%;
 }
 
 .hashtag-filter .sa-pill-btn.active {
