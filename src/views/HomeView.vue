@@ -264,7 +264,11 @@ async function handleDownload() {
   }
 
   if (hasInvalidHandleChars(account, platform.value)) {
-    toast.warning('用户名不能含空格，请使用下划线 _（如 taeyeon_ss）')
+    toast.warning(
+      platform.value === 'weibo'
+        ? '微博请用数字 UID，或粘贴 weibo.com/u/数字'
+        : '用户名不能含空格，请使用下划线 _（如 taeyeon_ss）',
+    )
     return
   }
 

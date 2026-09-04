@@ -236,7 +236,7 @@ Browse is full-bleed under a thin tab strip. The feed is a 600px column on paper
 
 **Hashtag filter (v1.2):** Top bar shows extracted `#话题` as pill toggles; one active tag filters the visible posts. Snippet highlighting from search remains separate.
 
-**Chrome polish (v1.1.1):** Cache and Settings use inset `sa-section` panels on `--sa-panel`. Controls share `--sa-hover`, `--sa-transition`, 12px control radius, and accent focus rings. Browse bar uses shared `sa-pill-btn` tokens. Post timeline layout unchanged.
+**Chrome polish (v1.1.1):** Cache and Settings use inset `sa-section` panels on `--sa-panel`. Controls share `--sa-hover`, `--sa-transition`, 12px control radius, and accent focus rings. Browse bar uses shared `sa-pill-btn` tokens. The user-manager sidebar uses the same `sa-btn` / `sa-btn-ghost` / `sa-btn-danger` tokens as Cache and Settings. Post timeline layout unchanged.
 
 ## Elevation & Depth
 
@@ -273,7 +273,7 @@ Source-faithful layout: if Weibo or X would show it that way, so does the archiv
 - **Style:** Pill select, 32px, 12px padding. `--sa-field` + `--sa-edge`.
 - **Focus:** Browser default on the documented theme; do not add Element glow.
 
-Settings cookie rows are a compact name + masked value + ghost/danger pills, same 13px type as other operator fields. Do not show the raw cookie.
+Settings cookie rows are a compact name + masked value + ghost/danger pills, same 13px type as other operator fields. Do not show the raw cookie. Cache / add-user `CookieInput` collapses to 「已登录」 when a usable cookie is already saved; 「重新登录」 expands F12 / in-app login.
 
 ### Navigation
 Thin product tabs in the sticky app bar. Active tab uses `--sa-accent` underline. Brand lockup is “Social Archiver” plus 社交存档. Theme toggle (“深色 / 浅色”) sits in the top bar beside the tabs.

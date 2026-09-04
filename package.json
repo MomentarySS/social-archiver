@@ -1,7 +1,7 @@
 {
   "name": "social-archiver",
   "private": true,
-  "version": "1.2.3",
+  "version": "1.2.4",
   "main": "electron-main.js",
   "scripts": {
     "dev": "vite",
@@ -44,21 +44,21 @@
     },
     "files": [
       "dist/**/*",
-    "electron-main.js",
-    "electron/**/*",
-    "electron-archives.js",
-    "archive-post-time.js",
-    "preload.js",
-    "json-lines.js",
-    "settings-merge.js",
-    "electron-search.js",
-    "electron-stats.js",
-    "electron-export-md.js",
-    "electron-rss.js",
-    "electron-export-json.js",
-    "electron-update-log.js",
-    "electron-scheduler.js",
-    "app-paths.js",
+      "electron-main.js",
+      "electron/**/*",
+      "electron-archives.js",
+      "archive-post-time.js",
+      "preload.js",
+      "json-lines.js",
+      "settings-merge.js",
+      "electron-search.js",
+      "electron-stats.js",
+      "electron-export-md.js",
+      "electron-rss.js",
+      "electron-export-json.js",
+      "electron-update-log.js",
+      "electron-scheduler.js",
+      "app-paths.js",
       "icons/icon.ico",
       "package.json"
     ],
@@ -72,11 +72,15 @@
       "target": [
         {
           "target": "zip",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "icons/icon.ico"

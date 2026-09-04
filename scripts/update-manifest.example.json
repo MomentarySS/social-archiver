@@ -1,6 +1,6 @@
 {
-  "version": "1.2.3",
+  "version": "1.2.4",
   "notesUrl": "https://example.com/social-archiver/CHANGELOG.html",
-  "zipUrl": "https://example.com/social-archiver/SocialArchiver-1.2.3-win.zip",
-  "releaseNotes": "粘贴主页链接抽出用户 ID；已登录 Cookie 默认折叠；浏览添加用户与缓存页共用登录组件；切 tab 记住当前浏览用户。"
+  "zipUrl": "https://example.com/social-archiver/SocialArchiver-1.2.4-win.zip",
+  "releaseNotes": "微博非数字 UID 会拦住；浏览侧栏按钮与缓存/设置页统一；文档与当前 Cookie / Instagram 行为对齐。"
 }

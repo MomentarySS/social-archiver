@@ -104,7 +104,7 @@
           class="sa-textarea"
           :value="modelValue"
           placeholder="粘贴 m.weibo.cn 的完整 Cookie（需包含 SUB）"
-          @input="onChange(($event.target as HTMLTextAreaElement).value)"
+          @input="onWeiboInput"
         />
         <span class="cookie-hint" :class="weiboHasSub ? 'ok' : 'miss'">
           {{ weiboHasSub ? '✓ SUB 已检测到' : '✗ SUB 未检测到' }}
@@ -255,6 +255,10 @@ function emitInstagramCookie() {
 function onChange(value: string) {
   markDirty()
   emit('update:modelValue', value)
+}
+
+function onWeiboInput(event: Event) {
+  onChange((event.target as HTMLTextAreaElement).value)
 }
 
 async function handleWeiboLogin() {

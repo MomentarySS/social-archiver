@@ -47,10 +47,18 @@ describe('normalizeUserId', () => {
     expect(normalizeUserId('instagram.com/taeyeon_ss/reels', 'instagram')).toBe('taeyeon_ss')
   })
 
+  it('detects invalid weibo ids that are not numeric UIDs', () => {
+    expect(hasInvalidHandleChars('1234567890', 'weibo')).toBe(false)
+    expect(hasInvalidHandleChars('123 456', 'weibo')).toBe(true)
+    expect(hasInvalidHandleChars('https://weibo.com/n/example', 'weibo')).toBe(true)
+  })
+
   it('extracts Weibo UID from profile URL', () => {
     expect(normalizeUserId('https://weibo.com/u/1234567890', 'weibo')).toBe('1234567890')
     expect(normalizeUserId('https://m.weibo.cn/profile/1195230310', 'weibo')).toBe('1195230310')
+    expect(normalizeUserId('https://m.weibo.cn/u/1195230310', 'weibo')).toBe('1195230310')
     expect(normalizeUserId('weibo.com/1195230310', 'weibo')).toBe('1195230310')
+    expect(normalizeUserId('https://weibo.cn/u/1234567890', 'weibo')).toBe('1234567890')
   })
 
   it('does not treat another platform URL as this platform id', () => {

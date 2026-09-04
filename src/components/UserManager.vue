@@ -4,7 +4,7 @@
     <div class="um-header">
       <span class="um-title">用户管理</span>
       <div class="um-header-actions">
-        <button class="ghost-btn" type="button" @click="toggleAddForm">
+        <button class="sa-btn sa-btn-ghost" type="button" @click="toggleAddForm">
           {{ showAddForm ? '取消' : '+ 添加用户' }}
         </button>
       </div>
@@ -80,7 +80,7 @@
         </label>
       </template>
       <div class="um-form-row um-form-actions">
-        <button class="primary-btn" type="button" :disabled="!addFormValid" @click="submitAddUser">
+        <button class="sa-btn sa-btn-primary" type="button" :disabled="!addFormValid" @click="submitAddUser">
           开始缓存
         </button>
       </div>
@@ -95,13 +95,13 @@
       <div class="um-footer-actions">
         <span class="um-selected-count">{{ checkedUsers.size }} 个已选</span>
         <button
-          class="ghost-btn"
+          class="sa-btn sa-btn-ghost"
           type="button"
           :disabled="checkedUsers.size === 0 || batchRunning"
           @click="emit('batch-delete', [...checkedUsers])"
         >批量删除</button>
         <button
-          class="primary-btn"
+          class="sa-btn sa-btn-primary"
           type="button"
           :disabled="checkedUsers.size === 0 || batchRunning"
           @click="startBatchUpdate"
@@ -124,7 +124,7 @@
         <div class="batch-bar-fill" :style="{ width: batchPercent + '%' }"></div>
       </div>
       <div class="um-form-row um-form-actions">
-        <button class="ghost-btn" type="button" @click="emit('stop-batch')">停止</button>
+        <button class="sa-btn sa-btn-ghost" type="button" @click="emit('stop-batch')">停止</button>
       </div>
     </div>
 
@@ -167,7 +167,7 @@
         <!-- Per-user actions -->
         <div class="um-item-actions" @click.stop>
           <button
-            class="ghost-btn um-action-btn"
+            class="sa-btn sa-btn-ghost um-action-btn"
             type="button"
             :disabled="batchRunning || isRunningUser(user)"
             :title="`更新 ${user.displayName || user.name}`"
@@ -176,7 +176,7 @@
             {{ isRunningUser(user) ? '…' : '更新' }}
           </button>
           <button
-            class="ghost-btn um-action-btn danger"
+            class="sa-btn sa-btn-danger um-action-btn"
             type="button"
             :disabled="batchRunning"
             :title="`删除 ${user.displayName || user.name} 的存档`"
@@ -210,8 +210,8 @@
           <p>确定删除 <strong>{{ deleteTarget.displayName || deleteTarget.name }}</strong> 的存档？</p>
           <p class="um-dialog-sub">此操作不可恢复。</p>
           <div class="um-dialog-actions">
-            <button class="ghost-btn" type="button" @click="deleteTarget = null">取消</button>
-            <button class="danger-btn" type="button" @click="doDelete">确认删除</button>
+            <button class="sa-btn sa-btn-ghost" type="button" @click="deleteTarget = null">取消</button>
+            <button class="sa-btn sa-btn-danger" type="button" @click="doDelete">确认删除</button>
           </div>
         </div>
       </div>
@@ -693,22 +693,6 @@ watch(() => props.users, () => {
   height: 26px;
   padding: 0 8px;
   font-size: 12px;
-  border-radius: 999px;
-  border: 1px solid var(--sa-edge);
-  background: transparent;
-  color: var(--sa-ink);
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.um-action-btn.danger {
-  color: #ed4956;
-  border-color: #ed4956;
-}
-
-.um-action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Batch bar */
@@ -776,41 +760,12 @@ watch(() => props.users, () => {
   transition: width 0.3s ease;
 }
 
-/* Buttons (reuse BrowseView skin buttons) */
-.ghost-btn,
-.primary-btn,
-.danger-btn {
+.um-header-actions .sa-btn,
+.um-footer-actions .sa-btn,
+.um-form-actions .sa-btn,
+.um-dialog-actions .sa-btn {
   height: 30px;
-  border-radius: 999px;
   padding: 0 12px;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.ghost-btn {
-  background: transparent;
-  border: 1px solid var(--sa-edge);
-  color: var(--sa-ink);
-}
-
-.primary-btn {
-  background: var(--sa-accent, #ff8200);
-  border: 0;
-  color: #fff;
-}
-
-.danger-btn {
-  background: #ed4956;
-  border: 0;
-  color: #fff;
-}
-
-.ghost-btn:disabled,
-.primary-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Dialog */
