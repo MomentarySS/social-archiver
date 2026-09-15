@@ -37,7 +37,7 @@ npm.cmd run release:pack
 npm.cmd run electron:build
 ```
 
-产物（版本号见 `package.json` 的 `version`，当前 **1.2.4**）：
+产物（版本号见 `package.json` 的 `version`，当前 **1.2.5**）：
 
 - `dist-electron\SocialArchiver-<version>-win.zip` — 便携 zip，解压即用
 - `dist-electron\SocialArchiver-<version>-win.exe` — NSIS 安装包（开始菜单 + 卸载入口）
@@ -71,6 +71,8 @@ npm.cmd run electron:build
 **v1.2.3：** 可粘贴主页链接抽出用户 ID；已保存 Cookie 默认折叠；浏览侧栏添加用户与缓存页同一套登录；切 tab 不再丢掉当前浏览用户。
 
 **v1.2.4：** 微博非数字 UID 会拦住；浏览侧栏按钮与缓存/设置页统一；文档与当前 Cookie / IG 行为对齐。
+
+**v1.2.5：** 下载错误不再假死；等待限流时会显示状态。微博媒体支持 `.part` 断点续传并在校验通过后落盘；未知总量下载使用不确定进度条。批量队列可在重启后恢复，存档 JSON 和设置改为原子写入。
 
 ## 文档
 

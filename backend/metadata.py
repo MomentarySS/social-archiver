@@ -1,9 +1,29 @@
 import json
 import os
+import tempfile
 from typing import Dict, Optional
 
 AVATAR_STEM = "_avatar"
 AVATAR_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+
+
+def _atomic_json_write(path: str, value: Dict) -> None:
+    """Write JSON beside the target, then atomically replace it."""
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        raise
 
 
 def save_post_metadata(output_dir: str, user_id: str, metadata: Dict) -> None:
@@ -13,8 +33,7 @@ def save_post_metadata(output_dir: str, user_id: str, metadata: Dict) -> None:
     posts_dir = os.path.join(output_dir, user_id, "_posts", date)
     os.makedirs(posts_dir, exist_ok=True)
     meta_path = os.path.join(posts_dir, f"{post_id}.json")
-    with open(meta_path, "w", encoding="utf-8") as handle:
-        json.dump(metadata, handle, ensure_ascii=False, indent=2)
+    _atomic_json_write(meta_path, metadata)
 
 
 def save_profile(output_dir: str, user_id: str, profile: Dict) -> None:
@@ -28,8 +47,7 @@ def save_profile(output_dir: str, user_id: str, profile: Dict) -> None:
         except Exception:
             existing = {}
     existing.update({k: v for k, v in profile.items() if v not in (None, "")})
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(existing, handle, ensure_ascii=False, indent=2)
+    _atomic_json_write(path, existing)
 
 
 def existing_avatar(user_dir: str) -> str:

@@ -40,7 +40,21 @@ function createSettingsStore(ctx) {
   function writeSettingsFile(settings) {
     const configPath = getSettingsPath();
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify(settings, null, 2), 'utf-8');
+    const tempPath = `${configPath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      const payload = JSON.stringify(settings, null, 2);
+      const fd = fs.openSync(tempPath, 'w');
+      try {
+        fs.writeFileSync(fd, payload, 'utf-8');
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(tempPath, configPath);
+    } catch (error) {
+      try { fs.unlinkSync(tempPath); } catch (_) { /* ignore */ }
+      throw error;
+    }
   }
 
   async function saveSettingsPatch(patch) {

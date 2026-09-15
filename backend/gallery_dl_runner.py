@@ -194,7 +194,8 @@ def iter_gallery_dl_download(
                     "file": filename,
                     "current": stats.total,
                     "total": stats.total,
-                    "percent": 100.0,
+                    "percent": 0.0,
+                    "total_known": False,
                 }
                 yield {"type": "status", "msg": f"已下载: {filename}"}
                 continue

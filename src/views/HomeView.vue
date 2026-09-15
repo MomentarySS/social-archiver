@@ -114,6 +114,7 @@
       <DownloadProgress
         :is-downloading="isDownloading"
         :progress="progress"
+        :status-message="statusMessage"
         :result="result"
         :posts-count="postsCount"
         :fetch-status="fetchStatus"
@@ -147,6 +148,7 @@ interface Progress {
   file?: string
   current?: number
   total?: number
+  total_known?: boolean
 }
 
 interface Result {
@@ -183,6 +185,7 @@ const concurrent = ref(3)
 const namingTemplate = ref('{post_id}_{index}')
 const isDownloading = ref(false)
 const progress = ref<Progress | null>(null)
+const statusMessage = ref('')
 const result = ref<Result | null>(null)
 const postsCount = ref<number | undefined>(undefined)
 const fetchStatus = ref('')
@@ -274,6 +277,7 @@ async function handleDownload() {
 
   // Reset state
   progress.value = null
+  statusMessage.value = ''
   result.value = null
   postsCount.value = undefined
   fetchStatus.value = ''
@@ -388,13 +392,16 @@ async function handleDownloadEvent(event: DownloadEvent) {
   }
   // Discriminated union: narrowing via event.type directly
   if (event.type === 'progress') {
+    statusMessage.value = '正在下载媒体…'
     progress.value = {
       file: event.file,
       percent: event.percent,
       current: event.current,
       total: event.total,
+      total_known: event.total_known,
     }
   } else if (event.type === 'done') {
+    statusMessage.value = '缓存完成'
     result.value = {
       count: event.count,
       skipped: event.skipped,
@@ -409,12 +416,14 @@ async function handleDownloadEvent(event: DownloadEvent) {
     }
     await refreshOfflinePage(event.userDir)
   } else if (event.type === 'error') {
+    statusMessage.value = '下载失败'
     result.value = { error: event.msg }
     isDownloading.value = false
     addLog(`错误：${event.msg}`, 'error')
     toast.error(event.msg || '下载失败')
   } else if (event.type === 'status') {
     if (event.msg) {
+      statusMessage.value = event.msg
       addLog(event.msg, 'info')
       // 解析微博中间状态「已缓存 N 条原创」提取帖子计数
       const m = event.msg.match(/已缓存\s*(\d+)\s*条原创/)

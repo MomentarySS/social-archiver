@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from backend.weibo import (
     EXISTING_STREAK_STOP,
@@ -11,6 +12,7 @@ from backend.weibo import (
     _collect_media,
     _date_range_changed,
     _cookie_session,
+    _download_one,
     _format_weibo_api_error,
     _forward_has_comment,
     _is_original,
@@ -30,9 +32,52 @@ from backend.weibo import (
 
 
 class WeiboHelpersTest(unittest.TestCase):
+    class _Response:
+        def __init__(self, status_code, chunks, content_type="image/jpeg"):
+            self.status_code = status_code
+            self.headers = {"Content-Type": content_type}
+            self._chunks = chunks
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def iter_content(self, _size):
+            return iter(self._chunks)
+
     def test_existing_streak_stop_is_small_positive(self):
         self.assertGreaterEqual(EXISTING_STREAK_STOP, 3)
         self.assertLessEqual(EXISTING_STREAK_STOP, 10)
+
+    def test_download_one_resumes_valid_part_file(self):
+        payload = b"\xff\xd8\xff" + b"x" * 97
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "photo.jpg")
+            with open(path + ".part", "wb") as handle:
+                handle.write(payload[:70])
+            response = self._Response(206, [payload[70:]])
+            with patch("backend.weibo.requests.get", return_value=response) as request:
+                result = _download_one("https://wx1.sinaimg.cn/large/photo.jpg", path, {})
+            self.assertEqual(result["type"], "downloaded")
+            self.assertFalse(os.path.exists(path + ".part"))
+            with open(path, "rb") as handle:
+                self.assertEqual(handle.read(), payload)
+            self.assertEqual(request.call_args.kwargs["headers"]["Range"], "bytes=70-")
+
+    def test_download_one_restarts_when_server_ignores_range(self):
+        payload = b"\xff\xd8\xff" + b"y" * 97
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "photo.jpg")
+            with open(path + ".part", "wb") as handle:
+                handle.write(payload[:70])
+            response = self._Response(200, [payload])
+            with patch("backend.weibo.requests.get", return_value=response):
+                result = _download_one("https://wx1.sinaimg.cn/large/photo.jpg", path, {})
+            self.assertEqual(result["type"], "downloaded")
+            with open(path, "rb") as handle:
+                self.assertEqual(handle.read(), payload)
 
     def test_is_original_skips_retweets(self):
         self.assertFalse(_is_original({"retweeted_status": {"id": "1"}, "user": {"id": "9"}}, "9"))

@@ -10,6 +10,7 @@ const { hasUsableCookie, extractCookieValue } = require('../cookie-rules');
 
 function createDownloadIpc(ctx, settingsStore, backend, notify) {
   const { readSettings, persistJobCookie } = settingsStore;
+  const { getDataDir } = settingsStore;
   const { spawnBackendJob, clampConcurrent, readTwitterFetchOptions, readWeiboFetchOptions, readInstagramFetchOptions } = backend;
   const { notifyDesktop, logUpdate, updateProfileLastUpdate } = notify;
 
@@ -25,6 +26,55 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
   function clearBatchRetryTimers() {
     for (const timer of ctx.batchRetryTimers) clearTimeout(timer);
     ctx.batchRetryTimers = [];
+  }
+
+  function pendingBatchPath() {
+    return path.join(getDataDir(), 'pending-batch.json');
+  }
+
+  function persistPendingBatch() {
+    const jobs = [];
+    if (ctx.currentBatchJob) jobs.push({ ...ctx.currentBatchJob, _resumeActive: true });
+    jobs.push(...ctx.downloadQueue);
+    const target = pendingBatchPath();
+    try {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      if (!jobs.length) {
+        try { fs.unlinkSync(target); } catch (_) { /* already clear */ }
+        return;
+      }
+      const temp = `${target}.tmp`;
+      fs.writeFileSync(temp, JSON.stringify({ version: 1, savedAt: new Date().toISOString(), jobs }, null, 2), 'utf8');
+      fs.renameSync(temp, target);
+    } catch (error) {
+      debugLog(`保存批量任务快照失败: ${error.message}`);
+    }
+  }
+
+  function restorePendingBatch() {
+    const target = pendingBatchPath();
+    try {
+      if (!fs.existsSync(target)) return { restored: 0 };
+      const payload = JSON.parse(fs.readFileSync(target, 'utf8')) || {};
+      const jobs = Array.isArray(payload.jobs) ? payload.jobs.filter((job) => (
+        job && job.platform && job.userId && job.outputDir
+      )).map((job) => {
+        const next = { ...job };
+        delete next._resumeActive;
+        return next;
+      }) : [];
+      if (!jobs.length) {
+        try { fs.unlinkSync(target); } catch (_) { /* ignore */ }
+        return { restored: 0 };
+      }
+      ctx.downloadQueue.push(...jobs);
+      persistPendingBatch();
+      processQueue();
+      return { restored: jobs.length };
+    } catch (error) {
+      debugLog(`恢复批量任务快照失败: ${error.message}`);
+      return { restored: 0, error: error.message };
+    }
   }
 
   async function resolveInstagramJobCookie(job) {
@@ -77,6 +127,20 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
     ctx.mainWindow?.webContents.send('download:log', { msg: message });
   }
 
+  function createDownloadHeartbeat(send) {
+    let lastOutputAt = Date.now();
+    const timer = setInterval(() => {
+      const idleSeconds = Math.floor((Date.now() - lastOutputAt) / 1000);
+      if (idleSeconds >= 30) {
+        send(`下载仍在进行，已 ${idleSeconds} 秒没有新进度。平台可能正在限流或重试，请继续等待。`);
+      }
+    }, 30_000);
+    return {
+      touch: () => { lastOutputAt = Date.now(); },
+      stop: () => clearInterval(timer),
+    };
+  }
+
   function scheduleBatchRetry(job, message, userDir) {
     const retryCount = Number(job._retryCount) || 0;
     const { enabled, maxAttempts, baseDelayMs } = getBatchRetrySettings();
@@ -113,6 +177,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
       ctx.currentBatchJob = null;
       ctx.batchProcess = null;
       ctx.batchStopRequested = false;
+      persistPendingBatch();
       ctx.mainWindow?.webContents.send('batch:done', { type: 'batch-stopped' });
       return;
     }
@@ -120,6 +185,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
     if (ctx.downloadQueue.length === 0) {
       ctx.isBatchRunning = false;
       ctx.currentBatchJob = null;
+      persistPendingBatch();
       if (ctx.mainWindow && !ctx.mainWindow.isDestroyed()) {
         ctx.mainWindow.webContents.send('batch:done', { type: 'batch-done' });
         notifyDesktop('Social Archiver', '批量缓存已全部完成');
@@ -130,6 +196,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
     ctx.isBatchRunning = true;
     const job = ctx.downloadQueue.shift();
     ctx.currentBatchJob = job;
+    persistPendingBatch();
 
     ctx.mainWindow?.webContents.send('batch:event', {
       type: 'user-start',
@@ -150,6 +217,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
   async function startBatchJob(job) {
     ctx.batchProcess = null;
     let proc;
+    let sawDone = false;
     try {
       const withLatest = { ...job, cookie: latestJobCookie(job) };
       const cookieInfo = await resolveInstagramJobCookie(withLatest);
@@ -171,6 +239,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
       }
       ctx.currentBatchJob = null;
       ctx.batchProcess = null;
+      persistPendingBatch();
       processQueue();
       return;
     }
@@ -181,6 +250,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
           persistJobCookie(job.platform, job.userId, evt.cookie);
         }
         if (evt.type === 'done') {
+          sawDone = true;
           evt.userDir = path.join(job.outputDir, job.platform, job.userId);
           updateProfileLastUpdate(evt.userDir);
           logUpdate(job.outputDir, {
@@ -204,10 +274,19 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
         });
       },
     );
+    const heartbeat = createDownloadHeartbeat((msg) => {
+      ctx.mainWindow?.webContents.send('batch:event', {
+        type: 'user-progress', userId: job.userId, platform: job.platform, msg,
+      });
+    });
 
-    proc.stdout.on('data', (data) => parser.push(data));
+    proc.stdout.on('data', (data) => {
+      heartbeat.touch();
+      parser.push(data);
+    });
 
     proc.stderr.on('data', (data) => {
+      heartbeat.touch();
       const msg = data.toString('utf8').trim();
       if (msg) {
         ctx.mainWindow?.webContents.send('batch:event', {
@@ -220,23 +299,27 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
     });
 
     proc.on('close', (code) => {
+      heartbeat.stop();
       parser.flush();
       const userDir = path.join(job.outputDir, job.platform, job.userId);
       if (ctx.batchStopRequested) {
         ctx.currentBatchJob = null;
         ctx.batchProcess = null;
+        persistPendingBatch();
         processQueue();
         return;
       }
-      if (code !== 0) {
+      if (code !== 0 || !sawDone) {
         logUpdate(job.outputDir, {
           platform: job.platform,
           userId: job.userId,
           success: false,
-          error: `exit ${code}`,
+          error: code !== 0 ? `exit ${code}` : 'exited without done event',
           batch: true,
         });
-        const message = `进程退出（代码 ${code}）`;
+        const message = code !== 0
+          ? `进程退出（代码 ${code}）`
+          : '缓存进程已结束，但没有返回完成结果';
         if (!scheduleBatchRetry(job, message, userDir)) {
           ctx.mainWindow?.webContents.send('batch:event', {
             type: 'user-error',
@@ -258,6 +341,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
       }
       ctx.currentBatchJob = null;
       ctx.batchProcess = null;
+      persistPendingBatch();
       processQueue();
     });
   }
@@ -270,6 +354,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
     for (const job of jobs) {
       ctx.downloadQueue.push(job);
     }
+    persistPendingBatch();
     if (!ctx.isBatchRunning) {
       processQueue();
     }
@@ -325,6 +410,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
       ctx.isBatchRunning = false;
       ctx.currentBatchJob = null;
       ctx.batchStopRequested = false;
+      persistPendingBatch();
       ctx.mainWindow?.webContents.send('batch:done', { type: 'batch-stopped' });
     }
     return {};
@@ -348,6 +434,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
     } = jobArgs;
 
     try {
+      let sawDone = false;
       const cookieInfo = await resolveInstagramJobCookie({ platform, userId, cookie });
       if (cookieInfo.refreshed) {
         notifyInstagramCookieRefresh(cookieInfo.message);
@@ -378,6 +465,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
             persistJobCookie(platform, userId, parsed.cookie);
           }
           if (parsed.type === 'done') {
+            sawDone = true;
             parsed.userDir = path.join(outputDir, platform, userId);
             updateProfileLastUpdate(parsed.userDir);
             logUpdate(outputDir, {
@@ -396,10 +484,17 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
           ctx.mainWindow?.webContents.send('download:log', { msg: line });
         },
       );
+      const heartbeat = createDownloadHeartbeat((msg) => {
+        ctx.mainWindow?.webContents.send('download:log', { msg });
+      });
 
-      ctx.downloadProcess.stdout.on('data', (data) => parser.push(data));
+      ctx.downloadProcess.stdout.on('data', (data) => {
+        heartbeat.touch();
+        parser.push(data);
+      });
 
       ctx.downloadProcess.stderr.on('data', (data) => {
+        heartbeat.touch();
         const msg = data.toString('utf8').trim();
         if (msg) {
           ctx.mainWindow?.webContents.send('download:log', { msg });
@@ -407,10 +502,14 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
       });
 
       ctx.downloadProcess.on('close', (code) => {
+        heartbeat.stop();
         parser.flush();
         ctx.downloadProcess = null;
-        if (code !== 0) {
-          ctx.mainWindow?.webContents.send('download:error', { msg: `缓存进程异常退出（代码 ${code}）` });
+        if (code !== 0 || !sawDone) {
+          const msg = code !== 0
+            ? `缓存进程异常退出（代码 ${code}）`
+            : '缓存进程已结束，但没有返回完成结果';
+          ctx.mainWindow?.webContents.send('download:error', { msg });
         }
       });
 
@@ -432,7 +531,7 @@ function createDownloadIpc(ctx, settingsStore, backend, notify) {
 
   ipcMain.handle('is-downloading', async () => ctx.downloadProcess !== null || ctx.isBatchRunning);
 
-  return { buildScheduledJobs, enqueueBatchDownloadInternal };
+  return { buildScheduledJobs, enqueueBatchDownloadInternal, restorePendingBatch };
 }
 
 module.exports = { createDownloadIpc };
