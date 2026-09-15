@@ -81,6 +81,7 @@ function createWindow() {
   } else {
     ctx.mainWindow.loadFile(path.join(__dirname, 'dist/index.html'));
   }
+  return ctx.mainWindow;
 }
 
 let downloadIpc = null;
@@ -116,7 +117,9 @@ app.whenReady().then(() => {
     isDownloading: async () => ctx.downloadProcess !== null || ctx.isBatchRunning,
   });
   ctx.schedulerController.start();
-  createWindow();
+  const window = createWindow();
+  // Wait until the renderer has registered its listeners before resuming a batch.
+  window.webContents.once('did-finish-load', () => downloadIpc.restorePendingBatch());
 });
 
 app.on('window-all-closed', () => {

@@ -283,6 +283,7 @@ def main():
 
     cookie = _read_cookie(args)
 
+    failed = False
     try:
         for event in download_media(
             platform=args.platform,
@@ -304,9 +305,12 @@ def main():
             include_likes=args.include_likes,
         ):
             _emit(event)
+            if event.get("type") == "error":
+                failed = True
     except Exception as e:
         _emit({"type": "error", "msg": str(e)})
         sys.exit(1)
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

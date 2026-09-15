@@ -2,10 +2,11 @@
   <div v-if="isDownloading || progress || result" class="download-progress">
     <div class="progress-header">
       <span class="progress-status">{{ statusText }}</span>
-      <span v-if="progress && barPercent > 0" class="percent">{{ Math.round(barPercent) }}%</span>
+      <span v-if="progress && progress.total_known !== false && barPercent > 0" class="percent">{{ Math.round(barPercent) }}%</span>
     </div>
     <div
       class="bar"
+      :class="{ 'bar--indeterminate': progress && progress.total_known === false }"
       role="progressbar"
       :aria-valuenow="Math.round(barPercent)"
       aria-valuemin="0"
@@ -18,9 +19,13 @@
         <span>当前</span>
         <b>{{ progress.file || '处理中' }}</b>
       </div>
-      <div v-if="progress.total && progress.total > (progress.current ?? 0)" class="detail-row">
+      <div v-if="progress.total_known !== false && progress.total && progress.total > (progress.current ?? 0)" class="detail-row">
         <span>媒体</span>
         <b>{{ (progress.current ?? 0) }} / {{ progress.total }}</b>
+      </div>
+      <div v-else-if="progress.total_known === false" class="detail-row">
+        <span>媒体</span>
+        <b>已完成 {{ progress.current ?? 0 }} 个</b>
       </div>
       <div v-if="postsCount" class="detail-row">
         <span>帖子</span>
@@ -37,7 +42,8 @@ import { computed } from 'vue'
 
 const props = defineProps<{
   isDownloading: boolean
-  progress: { percent?: number; file?: string; current?: number; total?: number } | null
+  progress: { percent?: number; file?: string; current?: number; total?: number; total_known?: boolean } | null
+  statusMessage?: string
   result: { count?: number; skipped?: number; posts?: number; error?: string; fetch_status?: string } | null
   postsCount?: number
   fetchStatus?: string
@@ -45,6 +51,7 @@ const props = defineProps<{
 
 const barPercent = computed(() => {
   if (!props.progress) return 0
+  if (props.progress.total_known === false) return 0
   const cur = props.progress.current ?? 0
   const tot = props.progress.total ?? 0
   if (tot > cur) return (cur / tot) * 100
@@ -53,7 +60,7 @@ const barPercent = computed(() => {
 
 const statusText = computed(() => {
   if (props.result?.error) return '出错了'
-  if (props.isDownloading) return '正在缓存原创内容…'
+  if (props.isDownloading) return props.statusMessage || '正在缓存原创内容…'
   if (props.progress) return '处理中…'
   return '准备就绪'
 })
@@ -105,6 +112,10 @@ const fetchStatusHint = computed(() => {
   font-size: 13px;
   font-weight: 700;
   color: var(--sa-ink);
+  max-width: 82%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .percent {
@@ -130,6 +141,17 @@ const fetchStatusHint = computed(() => {
   background: linear-gradient(90deg, var(--sa-accent), color-mix(in srgb, var(--sa-accent) 70%, #fff));
   border-radius: 999px;
   transition: transform 0.2s ease-out;
+}
+
+.bar--indeterminate i {
+  width: 35%;
+  transform: translateX(-100%) !important;
+  animation: sa-progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes sa-progress-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(285%); }
 }
 
 .details {

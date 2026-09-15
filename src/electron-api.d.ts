@@ -188,7 +188,7 @@ export interface UserEntry {
 }
 
 // Discriminated union for the download:event IPC channel
-export type ProgressEvent = { type: 'progress'; file: string; percent: number; current: number; total: number }
+export type ProgressEvent = { type: 'progress'; file: string; percent: number; current: number; total: number; total_known?: boolean }
 export type DoneResult    = { type: 'done';    count: number; skipped: number; posts: number; fetch_status?: string; output_dir?: string; userDir?: string; cookie?: string }
 export type ErrorResult   = { type: 'error';  msg: string; cookie?: string }
 export type StatusEvent   = { type: 'status'; msg: string; cookie?: string }

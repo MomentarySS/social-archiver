@@ -445,7 +445,8 @@ def download_weibo_media(
                         "file": event["file"],
                         "current": total_downloaded,
                         "total": total_downloaded + len(download_jobs),
-                        "percent": 100.0,
+                        "percent": 0.0,
+                        "total_known": False,
                     }
                     yield {"type": "status", "msg": f"已下载: {event['file']}"}
                 elif event.get("type") == "failed":
@@ -1204,42 +1205,60 @@ def _download_one(url: str, filepath: str, headers: Dict[str, str]) -> Dict:
     last_err = "下载失败"
     is_livephoto = not is_image and _is_livephoto_motion_url(url)
     header_modes = (False, True) if is_livephoto else (False,)
+    part_path = f"{filepath}.part"
     for candidate in candidates[:8]:
         for include_cookie in header_modes:
             wrote = False
+            existing_size = 0
             try:
+                os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                if os.path.exists(part_path):
+                    if _media_file_ok(part_path):
+                        existing_size = os.path.getsize(part_path)
+                    else:
+                        _remove_if_invalid(part_path)
+                request_headers = _headers_for_media(candidate, headers, include_cookie=include_cookie)
+                if existing_size:
+                    request_headers = {**request_headers, "Range": f"bytes={existing_size}-"}
                 resp = requests.get(
                     candidate,
-                    headers=_headers_for_media(candidate, headers, include_cookie=include_cookie),
-                    timeout=60,
+                    headers=request_headers,
+                    timeout=(15, 60),
                     stream=True,
                 )
-                if resp.status_code != 200:
+                if resp.status_code == 416 and existing_size:
+                    _remove_if_invalid(part_path)
+                    continue
+                if resp.status_code not in (200, 206):
                     last_err = f"HTTP {resp.status_code}"
                     continue
                 content_type = (resp.headers.get("Content-Type") or "").lower()
                 if "text/html" in content_type or "application/json" in content_type:
                     last_err = "接口返回了非媒体内容"
                     continue
-                os.makedirs(os.path.dirname(filepath), exist_ok=True)
-                with open(filepath, "wb") as handle:
+                # Some media hosts ignore Range and return 200; restart cleanly in that case.
+                append = bool(existing_size and resp.status_code == 206)
+                with open(part_path, "ab" if append else "wb") as handle:
                     for chunk in resp.iter_content(65536):
                         if not chunk:
                             continue
-                        if not wrote and not _looks_like_media(chunk):
+                        if not wrote and not existing_size and not _looks_like_media(chunk):
                             last_err = "接口返回了非媒体内容"
                             wrote = False
                             break
                         handle.write(chunk)
                         wrote = True
-                if wrote and _media_file_ok(filepath):
+                if wrote and _media_file_ok(part_path):
+                    os.replace(part_path, filepath)
                     return {"type": "downloaded", "file": filename}
                 if wrote:
                     last_err = "空文件或损坏"
-                _remove_if_invalid(filepath)
+                if not _media_file_ok(part_path):
+                    _remove_if_invalid(part_path)
             except Exception as e:
                 last_err = str(e)
-                _remove_if_invalid(filepath)
+                if not _media_file_ok(part_path):
+                    _remove_if_invalid(part_path)
     return {"type": "failed", "file": filename, "msg": last_err}
 
 
