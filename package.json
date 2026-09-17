@@ -1,6 +1,5 @@
 {
   "name": "social-archiver",
-  "private": true,
   "version": "1.2.5",
   "main": "electron-main.js",
   "scripts": {
