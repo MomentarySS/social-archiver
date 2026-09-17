@@ -28,3 +28,7 @@ __pycache__/
 *.sw?
 
 .mimosa/
+
+# IDE / agent config
+.cursor
+.zcode
